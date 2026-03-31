@@ -10,6 +10,9 @@ const branding = getBranding();
 export const metadata: Metadata = {
   title: branding.portalTitle,
   description: branding.portalSubtitle,
+  icons: {
+    icon: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({
