@@ -188,7 +188,7 @@ export default function OffboardingFormPage() {
             >
               <SelectTrigger>
                 <SelectValue
-                  placeholder={`Select ${field.label.toLowerCase()}`}
+                  placeholder={`Select ${field.label}`}
                 />
               </SelectTrigger>
               <SelectContent>

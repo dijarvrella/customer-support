@@ -201,7 +201,7 @@ export default function OnboardingFormPage() {
             >
               <SelectTrigger>
                 <SelectValue
-                  placeholder={`Select ${field.label.toLowerCase()}`}
+                  placeholder={`Select ${field.label}`}
                 />
               </SelectTrigger>
               <SelectContent>
