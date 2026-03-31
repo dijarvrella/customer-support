@@ -14,7 +14,7 @@ import crypto from "crypto";
 
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
 const PORTAL_URL = process.env.NEXTAUTH_URL || "https://it-support.zimark.link";
-const DEDUP_WINDOW_SECONDS = 60; // Messages within 60s from same user merge into one ticket
+const DEDUP_WINDOW_SECONDS = 120; // Messages within 2 minutes from same user merge into one ticket
 
 // ─── Slack API helpers ──────────────────────────────────────────────────────
 
@@ -231,21 +231,26 @@ export async function POST(request: NextRequest) {
         } else {
           // ─── NEW MESSAGE → Check dedup, then create ticket ─────────────
 
-          // Dedup: check if same user sent a message in the last N seconds
+          // Dedup: check for recent tickets from same user via Slack
+          // Use Slack ts (unix timestamp) for comparison since DB writes race
+          const currentTs = parseFloat(ts);
           const recentLink = await db
             .select({
               ticketId: slackMessageLinks.ticketId,
               messageTs: slackMessageLinks.messageTs,
             })
             .from(slackMessageLinks)
+            .innerJoin(tickets, eq(slackMessageLinks.ticketId, tickets.id))
             .where(
               and(
                 eq(slackMessageLinks.channelId, channel),
-                eq(slackMessageLinks.slackUserId, slackUserId),
-                sql`${slackMessageLinks.createdAt} > NOW() - INTERVAL '${sql.raw(String(DEDUP_WINDOW_SECONDS))} seconds'`
+                eq(tickets.requesterId, dbUser.id),
+                eq(tickets.source, "slack"),
+                // Compare Slack timestamps: current ts minus window
+                sql`CAST(${slackMessageLinks.messageTs} AS DOUBLE PRECISION) > ${currentTs - DEDUP_WINDOW_SECONDS}`
               )
             )
-            .orderBy(desc(slackMessageLinks.createdAt))
+            .orderBy(desc(slackMessageLinks.messageTs))
             .limit(1);
 
           if (recentLink.length > 0) {
