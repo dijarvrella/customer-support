@@ -172,6 +172,7 @@ export function Sidebar({ user, pendingApprovalCount = 0 }: SidebarProps) {
   const adminNav: NavItemDef[] = [
     { href: "/admin/users", label: "Users", icon: Users },
     { href: "/admin/tenants", label: "Tenants", icon: Shield },
+    { href: "/admin/audit", label: "Audit Log", icon: List },
     { href: "/admin", label: "Settings", icon: Settings },
   ];
 

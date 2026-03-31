@@ -89,6 +89,18 @@ export const onboardingFormSchema = {
       title: "Access & Role Profile",
       fields: [
         {
+          id: "license_type",
+          type: "select",
+          label: "Microsoft 365 License",
+          required: true,
+          helperText: "Business Premium: Full M365 apps (Word, Excel, Teams, etc.) + security features. Standard: Email + basic web apps. Email Only: Exchange mailbox only, no desktop apps.",
+          options: [
+            { value: "business_premium", label: "Microsoft 365 Business Premium (Full suite + security)" },
+            { value: "business_standard", label: "Microsoft 365 Business Standard (Email + web apps)" },
+            { value: "exchange_only", label: "Exchange Online (Email only)" },
+          ],
+        },
+        {
           id: "role_template",
           type: "select",
           label: "Access Profile / Role Template",

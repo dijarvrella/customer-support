@@ -49,7 +49,9 @@ import {
   Lock,
   UserPlus,
   FileText,
+  Shield,
 } from "lucide-react";
+import { AutomationActions } from "@/components/tickets/automation-actions";
 
 interface TicketDetail {
   id: string;
@@ -615,6 +617,27 @@ export default function TicketDetailPage() {
                 )}
               </CardContent>
             </Card>
+          )}
+
+          {/* Automation Actions */}
+          <AutomationActions
+            ticketId={ticket.id}
+            formType={ticket.formType}
+            status={ticket.status}
+            userRole={currentUser?.role || "end_user"}
+          />
+
+          {/* Audit Log Link */}
+          {currentUser?.role === "it_admin" && (
+            <div className="flex items-center">
+              <Link
+                href={`/admin/audit?entityId=${ticket.id}&entityType=ticket`}
+                className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Shield className="h-3.5 w-3.5" />
+                View Audit Log
+              </Link>
+            </div>
           )}
 
           {/* Comments / Activity */}
