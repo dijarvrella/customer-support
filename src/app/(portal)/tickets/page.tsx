@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectTrigger,
@@ -21,6 +22,13 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   TICKET_STATUSES,
   TICKET_PRIORITIES,
@@ -39,6 +47,8 @@ import {
   ChevronRight,
   Loader2,
   ShieldCheck,
+  X,
+  UserPlus,
 } from "lucide-react";
 
 interface TicketRow {
@@ -83,6 +93,18 @@ export default function TicketsPage() {
   const [currentPage, setCurrentPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [hasApprovals, setHasApprovals] = useState(false);
+
+  // Bulk selection state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkActionLoading, setBulkActionLoading] = useState(false);
+
+  // Assign dialog state for bulk assign
+  const [bulkAssignDialogOpen, setBulkAssignDialogOpen] = useState(false);
+  const [userSearch, setUserSearch] = useState("");
+  const [userResults, setUserResults] = useState<
+    Array<{ id: string; name: string; email: string }>
+  >([]);
+  const [searchingUsers, setSearchingUsers] = useState(false);
 
   const pageSize = 20;
 
@@ -147,6 +169,7 @@ export default function TicketsPage() {
   useEffect(() => {
     setCursors([null]);
     setCurrentPage(0);
+    setSelectedIds(new Set());
     fetchTickets(null);
   }, [fetchTickets]);
 
@@ -159,6 +182,7 @@ export default function TicketsPage() {
     const newCursors = [...cursors, cursor];
     setCursors(newCursors);
     setCurrentPage(currentPage + 1);
+    setSelectedIds(new Set());
     fetchTickets(cursor);
   }
 
@@ -166,11 +190,116 @@ export default function TicketsPage() {
     if (currentPage <= 0) return;
     const newPage = currentPage - 1;
     setCurrentPage(newPage);
+    setSelectedIds(new Set());
     fetchTickets(cursors[newPage]);
   }
 
   function handleRowClick(id: string) {
     router.push(`/tickets/${id}`);
+  }
+
+  // --- Bulk selection helpers ---
+
+  function toggleSelectAll() {
+    if (selectedIds.size === tickets.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(tickets.map((t) => t.id)));
+    }
+  }
+
+  function toggleSelectOne(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set());
+  }
+
+  // --- Bulk actions ---
+
+  async function handleBulkStatusChange(newStatus: string) {
+    if (selectedIds.size === 0 || bulkActionLoading) return;
+    setBulkActionLoading(true);
+    try {
+      const results = await Promise.all(
+        Array.from(selectedIds).map((id) =>
+          fetch(`/api/tickets/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: newStatus }),
+          })
+        )
+      );
+      const failCount = results.filter((r) => !r.ok).length;
+      if (failCount > 0) {
+        console.error(`${failCount} ticket(s) failed to update status`);
+      }
+    } catch (error) {
+      console.error("Bulk status change error:", error);
+    } finally {
+      setBulkActionLoading(false);
+      setSelectedIds(new Set());
+      fetchTickets(cursors[currentPage]);
+    }
+  }
+
+  async function searchUsers(query: string) {
+    if (query.length < 2) {
+      setUserResults([]);
+      return;
+    }
+    setSearchingUsers(true);
+    try {
+      const res = await fetch(
+        `/api/users?search=${encodeURIComponent(query)}&limit=10`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setUserResults(
+          data.map((u: any) => ({ id: u.id, name: u.name, email: u.email }))
+        );
+      }
+    } finally {
+      setSearchingUsers(false);
+    }
+  }
+
+  async function handleBulkAssign(userId: string) {
+    if (selectedIds.size === 0 || bulkActionLoading) return;
+    setBulkActionLoading(true);
+    try {
+      const results = await Promise.all(
+        Array.from(selectedIds).map((id) =>
+          fetch(`/api/tickets/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ assigneeId: userId }),
+          })
+        )
+      );
+      const failCount = results.filter((r) => !r.ok).length;
+      if (failCount > 0) {
+        console.error(`${failCount} ticket(s) failed to reassign`);
+      }
+    } catch (error) {
+      console.error("Bulk assign error:", error);
+    } finally {
+      setBulkActionLoading(false);
+      setBulkAssignDialogOpen(false);
+      setUserSearch("");
+      setUserResults([]);
+      setSelectedIds(new Set());
+      fetchTickets(cursors[currentPage]);
+    }
   }
 
   const pageTitle =
@@ -186,6 +315,9 @@ export default function TicketsPage() {
       : viewAll
         ? "View and manage all tickets in the system"
         : "Track your submitted support requests";
+
+  const allSelected = tickets.length > 0 && selectedIds.size === tickets.length;
+  const someSelected = selectedIds.size > 0 && selectedIds.size < tickets.length;
 
   return (
     <div className="space-y-6">
@@ -251,6 +383,110 @@ export default function TicketsPage() {
         </Select>
       </div>
 
+      {/* Bulk Action Bar */}
+      {selectedIds.size > 0 && (
+        <div className="sticky top-0 z-20 flex flex-wrap items-center gap-3 rounded-lg border bg-background p-3 shadow-sm">
+          {bulkActionLoading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Updating {selectedIds.size} ticket{selectedIds.size !== 1 && "s"}...
+            </div>
+          ) : (
+            <>
+              <span className="text-sm font-medium">
+                {selectedIds.size} ticket{selectedIds.size !== 1 && "s"} selected
+              </span>
+
+              <Select
+                value=""
+                onValueChange={(value) => {
+                  if (value) handleBulkStatusChange(value);
+                }}
+              >
+                <SelectTrigger className="w-[180px] h-8 text-sm">
+                  <SelectValue placeholder="Change Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  {TICKET_STATUSES.map((status) => (
+                    <SelectItem key={status} value={status}>
+                      {STATUS_LABELS[status]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setBulkAssignDialogOpen(true)}
+              >
+                <UserPlus className="h-3.5 w-3.5 mr-1.5" />
+                Assign To
+              </Button>
+
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={clearSelection}
+              >
+                <X className="h-3.5 w-3.5 mr-1" />
+                Cancel Selection
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Bulk Assign Dialog */}
+      <Dialog
+        open={bulkAssignDialogOpen}
+        onOpenChange={(open) => {
+          setBulkAssignDialogOpen(open);
+          if (!open) {
+            setUserSearch("");
+            setUserResults([]);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Assign {selectedIds.size} Ticket{selectedIds.size !== 1 && "s"}</DialogTitle>
+            <DialogDescription>
+              Search for a user to assign the selected tickets to
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input
+              placeholder="Search by name or email..."
+              value={userSearch}
+              onChange={(e) => {
+                setUserSearch(e.target.value);
+                searchUsers(e.target.value);
+              }}
+            />
+            {searchingUsers && (
+              <p className="text-xs text-muted-foreground">Searching...</p>
+            )}
+            <div className="max-h-48 overflow-y-auto space-y-1">
+              {userResults.map((u) => (
+                <button
+                  type="button"
+                  key={u.id}
+                  onClick={() => handleBulkAssign(u.id)}
+                  disabled={bulkActionLoading}
+                  className="w-full text-left p-2 rounded-md hover:bg-accent flex items-center justify-between text-sm"
+                >
+                  <span className="font-medium">{u.name}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {u.email}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Table */}
       <Card>
         <CardContent className="p-0">
@@ -272,6 +508,13 @@ export default function TicketsPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/50">
+                    <th className="px-4 py-3 w-10" aria-label="Select">
+                      <Checkbox
+                        checked={allSelected ? true : someSelected ? "indeterminate" : false}
+                        onCheckedChange={toggleSelectAll}
+                        aria-label="Select all tickets"
+                      />
+                    </th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">
                       Ticket #
                     </th>
@@ -302,13 +545,30 @@ export default function TicketsPage() {
                   {tickets.map((ticket) => (
                     <tr
                       key={ticket.id}
-                      onClick={() => handleRowClick(ticket.id)}
-                      className="border-b last:border-0 hover:bg-accent/50 cursor-pointer transition-colors"
+                      className={`border-b last:border-0 hover:bg-accent/50 cursor-pointer transition-colors ${
+                        selectedIds.has(ticket.id) ? "bg-accent/30" : ""
+                      }`}
                     >
-                      <td className="px-4 py-3 font-mono text-xs text-muted-foreground whitespace-nowrap">
+                      <td
+                        className="px-4 py-3 w-10"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Checkbox
+                          checked={selectedIds.has(ticket.id)}
+                          onCheckedChange={() => toggleSelectOne(ticket.id)}
+                          aria-label={`Select ticket ${ticket.ticketNumber}`}
+                        />
+                      </td>
+                      <td
+                        className="px-4 py-3 font-mono text-xs text-muted-foreground whitespace-nowrap"
+                        onClick={() => handleRowClick(ticket.id)}
+                      >
                         {ticket.ticketNumber}
                       </td>
-                      <td className="px-4 py-3 font-medium max-w-[250px] truncate">
+                      <td
+                        className="px-4 py-3 font-medium max-w-[250px] truncate"
+                        onClick={() => handleRowClick(ticket.id)}
+                      >
                         <span className="flex items-center gap-1.5">
                           {ticket.title}
                           {hasIsoTag(ticket.tags) && (
@@ -322,7 +582,10 @@ export default function TicketsPage() {
                           )}
                         </span>
                       </td>
-                      <td className="px-4 py-3 hidden sm:table-cell">
+                      <td
+                        className="px-4 py-3 hidden sm:table-cell"
+                        onClick={() => handleRowClick(ticket.id)}
+                      >
                         <Badge
                           variant="outline"
                           className={
@@ -333,7 +596,10 @@ export default function TicketsPage() {
                             ticket.status}
                         </Badge>
                       </td>
-                      <td className="px-4 py-3 hidden md:table-cell">
+                      <td
+                        className="px-4 py-3 hidden md:table-cell"
+                        onClick={() => handleRowClick(ticket.id)}
+                      >
                         <Badge
                           variant="outline"
                           className={
@@ -347,16 +613,28 @@ export default function TicketsPage() {
                           ] || ticket.priority}
                         </Badge>
                       </td>
-                      <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">
+                      <td
+                        className="px-4 py-3 hidden lg:table-cell text-muted-foreground"
+                        onClick={() => handleRowClick(ticket.id)}
+                      >
                         {ticket.requester?.name || "Unknown"}
                       </td>
-                      <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">
+                      <td
+                        className="px-4 py-3 hidden lg:table-cell text-muted-foreground"
+                        onClick={() => handleRowClick(ticket.id)}
+                      >
                         {ticket.assignee?.name || "Unassigned"}
                       </td>
-                      <td className="px-4 py-3 hidden xl:table-cell text-muted-foreground text-xs">
+                      <td
+                        className="px-4 py-3 hidden xl:table-cell text-muted-foreground text-xs"
+                        onClick={() => handleRowClick(ticket.id)}
+                      >
                         {formatDate(ticket.createdAt)}
                       </td>
-                      <td className="px-4 py-3 text-right text-muted-foreground text-xs">
+                      <td
+                        className="px-4 py-3 text-right text-muted-foreground text-xs"
+                        onClick={() => handleRowClick(ticket.id)}
+                      >
                         {timeAgo(ticket.updatedAt)}
                       </td>
                     </tr>
