@@ -148,7 +148,7 @@ export default function TicketDetailPage() {
   const [commentBody, setCommentBody] = useState("");
   const [isInternal, setIsInternal] = useState(false);
   const [submittingComment, setSubmittingComment] = useState(false);
-  const [changingStatus, setChangingStatus] = useState(false);
+  const [changingStatus, setChangingStatus] = useState<string | null>(null);
 
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
   const [userSearch, setUserSearch] = useState("");
@@ -234,19 +234,23 @@ export default function TicketDetailPage() {
   }
 
   async function handleStatusChange(newStatus: string) {
-    setChangingStatus(true);
+    if (changingStatus) return; // Prevent double-click
+    setChangingStatus(newStatus);
     try {
       const res = await fetch(`/api/tickets/${ticketId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: newStatus }),
       });
-      if (!res.ok) throw new Error("Failed to update status");
+      if (!res.ok) {
+        const err = await res.text();
+        console.error("Status update failed:", err);
+      }
       await fetchTicket();
-    } catch {
-      // silent
+    } catch (err) {
+      console.error("Status change error:", err);
     } finally {
-      setChangingStatus(false);
+      setChangingStatus(null);
     }
   }
 
@@ -403,10 +407,10 @@ export default function TicketDetailPage() {
                 key={status}
                 variant="outline"
                 size="sm"
-                disabled={changingStatus}
+                disabled={changingStatus !== null}
                 onClick={() => handleStatusChange(status)}
               >
-                {changingStatus && (
+                {changingStatus === status && (
                   <Loader2 className="h-3 w-3 animate-spin mr-1" />
                 )}
                 {STATUS_LABELS[status as TicketStatus] || status}

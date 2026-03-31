@@ -170,7 +170,7 @@ export function Sidebar({ user, pendingApprovalCount = 0 }: SidebarProps) {
 
   const agentNav: NavItemDef[] = [
     { href: "/tickets?view=all", label: "All Tickets", icon: List },
-    { href: "/queues", label: "Queues", icon: Inbox },
+    { href: "/admin/queues", label: "Queues", icon: Inbox },
   ];
 
   const adminNav: NavItemDef[] = [

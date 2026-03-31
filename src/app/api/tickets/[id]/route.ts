@@ -159,21 +159,27 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       .where(eq(tickets.id, id))
       .returning();
 
-    // Log history entries
-    if (historyEntries.length > 0) {
-      await db.insert(ticketHistory).values(historyEntries);
-    }
-
-    // Audit log
-    await db.insert(auditLog).values({
-      eventType: "ticket.updated",
-      entityType: "ticket",
-      entityId: id,
-      actorId: session.user.id,
-      actorType: "user",
-      action: "update",
-      details: { changes: updates },
-    });
+    // Log history and audit in background (don't block response)
+    const actorId = session.user!.id;
+    const bgWork = async () => {
+      try {
+        if (historyEntries.length > 0) {
+          await db.insert(ticketHistory).values(historyEntries);
+        }
+        await db.insert(auditLog).values({
+          eventType: "ticket.updated",
+          entityType: "ticket",
+          entityId: id,
+          actorId,
+          actorType: "user",
+          action: "update",
+          details: { changes: updates },
+        });
+      } catch (err) {
+        console.error("Background audit logging failed:", err);
+      }
+    };
+    bgWork();
 
     return NextResponse.json(updated);
   } catch (error) {
