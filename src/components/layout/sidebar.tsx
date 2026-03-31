@@ -179,7 +179,7 @@ export function Sidebar({ user, pendingApprovalCount = 0 }: SidebarProps) {
     <div className="flex h-full flex-col">
       {/* Brand */}
       <div className="flex h-16 items-center gap-2 border-b px-6">
-        <img src="/logo-icon.svg" alt="Zimark" className="h-8 w-8" />
+        <img src="/zimark-icon.svg" alt="Zimark" className="h-8 w-8 rounded" />
         <span className="text-lg font-bold tracking-tight">Zimark ITSM</span>
       </div>
 

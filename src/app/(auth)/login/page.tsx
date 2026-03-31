@@ -59,10 +59,10 @@ export default function LoginPage() {
         <div className="text-center mb-8">
           <div className="flex justify-center mb-4">
             <Image
-              src="/logo.svg"
+              src="/zimark-logo.svg"
               alt="Zimark"
-              width={180}
-              height={40}
+              width={220}
+              height={50}
               priority
             />
           </div>
