@@ -304,6 +304,28 @@ export const auditLog = pgTable(
   ]
 );
 
+// ─── IN-APP NOTIFICATIONS ───────────────────────────────────────────────────
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    ticketId: uuid("ticket_id").references(() => tickets.id),
+    type: varchar("type", { length: 64 }).notNull(), // reminder, sla_warning, approval_needed, status_change, comment
+    title: varchar("title", { length: 500 }).notNull(),
+    body: text("body"),
+    isRead: boolean("is_read").notNull().default(false),
+    link: varchar("link", { length: 500 }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("idx_notifications_user").on(table.userId),
+    index("idx_notifications_read").on(table.userId, table.isRead),
+  ]
+);
+
 // ─── RELATIONS ──────────────────────────────────────────────────────────────
 export const tenantsRelations = relations(tenants, ({ many }) => ({
   users: many(users),
