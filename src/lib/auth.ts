@@ -101,20 +101,6 @@ providers.push(
         };
       }
 
-      // Demo tenant users (for presentations)
-      const demoUsers = [
-        { id: "00000000-0000-0000-0000-000000000001", email: "admin@demo-company.com", name: "Demo IT Admin", role: "it_admin", image: null },
-        { id: "00000000-0000-0000-0000-000000000002", email: "agent@demo-company.com", name: "Demo IT Agent", role: "it_agent", image: null },
-        { id: "00000000-0000-0000-0000-000000000003", email: "user@demo-company.com", name: "Demo Employee", role: "end_user", image: null },
-        { id: "00000000-0000-0000-0000-000000000004", email: "hr@demo-company.com", name: "Demo HR", role: "hr", image: null },
-        { id: "00000000-0000-0000-0000-000000000005", email: "security@demo-company.com", name: "Demo Security", role: "security", image: null },
-      ];
-
-      const demoUser = demoUsers.find((u) => u.email === email);
-      if (demoUser && password === "demo") {
-        return demoUser;
-      }
-
       return null;
     },
   })
