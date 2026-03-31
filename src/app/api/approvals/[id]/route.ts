@@ -5,10 +5,12 @@ import {
   tickets,
   ticketHistory,
   auditLog,
+  users,
 } from "@/lib/db/schema";
 import { auth } from "@/lib/auth";
 import { eq, and } from "drizzle-orm";
 import { APPROVAL_DECISIONS } from "@/lib/constants";
+import { sendApprovalDecisionEmail } from "@/lib/notifications/email";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -120,6 +122,35 @@ export async function POST(request: NextRequest, context: RouteContext) {
         resultingTicketStatus: newTicketStatus,
       },
     });
+
+    // Send approval decision email to requester (fire-and-forget)
+    if (decision === "approved" || decision === "rejected") {
+      const ticketRecord = await db.query.tickets.findFirst({
+        where: eq(tickets.id, ticketId),
+        columns: { ticketNumber: true, title: true, requesterId: true },
+      });
+
+      if (ticketRecord) {
+        const requesterUser = await db
+          .select({ email: users.email })
+          .from(users)
+          .where(eq(users.id, ticketRecord.requesterId))
+          .limit(1);
+
+        const requesterEmail = requesterUser[0]?.email;
+        const approverName = session.user.name || "an approver";
+
+        if (requesterEmail) {
+          sendApprovalDecisionEmail(
+            requesterEmail,
+            ticketRecord.ticketNumber,
+            ticketRecord.title,
+            decision,
+            approverName
+          ).catch(() => {});
+        }
+      }
+    }
 
     return NextResponse.json({
       approval: updatedApproval,

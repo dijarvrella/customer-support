@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { eq, desc, asc, and, or, like, lt, sql, count } from "drizzle-orm";
 import { generateTicketNumber } from "@/lib/utils";
 import { DEFAULT_SLA, type TicketPriority } from "@/lib/constants";
+import { sendTicketCreatedEmail, sendTicketAssignedEmail } from "@/lib/notifications/email";
 
 export async function GET(request: NextRequest) {
   try {
@@ -311,6 +312,26 @@ export async function POST(request: NextRequest) {
       });
     } catch (commentError) {
       console.error("Auto-reply comment failed:", commentError);
+    }
+
+    // Send email notifications (fire-and-forget)
+    const requesterEmail = session.user.email;
+    const portalUrl = `${request.nextUrl.origin}/tickets/${created.id}`;
+
+    if (requesterEmail) {
+      sendTicketCreatedEmail(requesterEmail, created.ticketNumber, created.title, portalUrl).catch(() => {});
+
+      if (created.assigneeId) {
+        // Look up assignee name for the notification
+        const assigneeRecord = await db
+          .select({ name: users.name })
+          .from(users)
+          .where(eq(users.id, created.assigneeId))
+          .limit(1);
+
+        const assigneeName = assigneeRecord[0]?.name || "an IT team member";
+        sendTicketAssignedEmail(requesterEmail, created.ticketNumber, created.title, assigneeName).catch(() => {});
+      }
     }
 
     return NextResponse.json(created, { status: 201 });

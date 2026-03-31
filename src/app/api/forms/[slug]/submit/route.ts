@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { tickets, approvals, auditLog, users } from "@/lib/db/schema";
 import { auth } from "@/lib/auth";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { generateTicketNumber } from "@/lib/utils";
 import { DEFAULT_SLA, type TicketPriority } from "@/lib/constants";
+import { getRequiredApprovers } from "@/lib/automations/org-chart";
 
 type RouteContext = { params: Promise<{ slug: string }> };
 
@@ -40,6 +41,33 @@ function generateTitle(slug: string, data: Record<string, unknown>): string {
   return `${prefix}: ${nameStr}`;
 }
 
+async function findOrCreateUser(
+  email: string,
+  name?: string
+): Promise<{ id: string }> {
+  // Case-insensitive lookup
+  const existing = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(sql`LOWER(${users.email}) = LOWER(${email})`)
+    .limit(1);
+
+  if (existing.length > 0) return existing[0];
+
+  // Create stub user
+  const [created] = await db
+    .insert(users)
+    .values({
+      email: email.toLowerCase(),
+      name: name || email.split("@")[0],
+      role: "end_user",
+      isActive: true,
+    })
+    .returning({ id: users.id });
+
+  return created;
+}
+
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
     const session = await auth();
@@ -65,11 +93,21 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const slaResponseDue = new Date(now.getTime() + sla.responseMinutes * 60 * 1000);
     const slaResolutionDue = new Date(now.getTime() + sla.resolutionMinutes * 60 * 1000);
 
-    const needsApproval =
-      slug === "employee-onboarding" ||
-      slug === "employee-offboarding" ||
-      slug === "grant-access" ||
-      slug === "revoke-access";
+    // Determine if approval is needed
+    const approvalRequired = [
+      "employee-onboarding",
+      "employee-offboarding",
+      "grant-access",
+      "revoke-access",
+      "aws-iam",
+      "aws-account-access",
+      "firewall-change",
+      "network-change",
+      "azure-change",
+      "hardware-purchase",
+      "new-employee-kit",
+      "security-tool",
+    ].includes(slug);
 
     const ticketNumber = generateTicketNumber();
 
@@ -87,53 +125,74 @@ export async function POST(request: NextRequest, context: RouteContext) {
         source: "portal",
         formData: data,
         formType: slug,
-        status: needsApproval ? "pending_approval" : "new",
+        status: approvalRequired ? "pending_approval" : "new",
         slaResponseDue,
         slaResolutionDue,
       })
       .returning();
 
-    // Auto-create approval records for onboarding/offboarding
-    if (needsApproval) {
-      const supervisorEmail =
-        (data.supervisor_email as string) ||
-        (data.supervisorEmail as string) ||
-        (data.manager_email as string) ||
-        (data.managerEmail as string);
+    // Auto-create approval records from Microsoft org chart
+    if (approvalRequired) {
+      const requesterEmail = session.user.email || "";
 
-      if (supervisorEmail) {
-        // Look up the manager/supervisor user, create a stub if not found
-        let approver = await db.query.users.findFirst({
-          where: eq(users.email, supervisorEmail),
-        });
+      try {
+        // Fetch required approvers from org chart
+        const orgApprovers = await getRequiredApprovers(requesterEmail, slug);
 
-        if (!approver) {
-          // Create a stub user for the approver
-          const supervisorName =
-            (data.supervisor_name as string) ||
-            (data.supervisorName as string) ||
-            (data.manager_name as string) ||
-            (data.managerName as string) ||
-            supervisorEmail.split("@")[0];
-
-          const [stubUser] = await db
-            .insert(users)
-            .values({
-              email: supervisorEmail,
-              name: supervisorName,
-              role: "approver",
-              isActive: true,
-            })
-            .returning();
-          approver = stubUser;
+        for (const approverInfo of orgApprovers) {
+          const approverUser = await findOrCreateUser(
+            approverInfo.email,
+            approverInfo.name
+          );
+          await db.insert(approvals).values({
+            ticketId: ticket.id,
+            approverId: approverUser.id,
+            approverRole: approverInfo.role,
+            status: "pending",
+          });
         }
 
-        await db.insert(approvals).values({
-          ticketId: ticket.id,
-          approverId: approver.id,
-          approverRole: "manager",
-          status: "pending",
-        });
+        // If no org approvers found, fall back to form-provided supervisor
+        if (orgApprovers.length === 0) {
+          const supervisorEmail =
+            (data.supervisor_email as string) ||
+            (data.supervisorEmail as string) ||
+            (data.manager_email as string) ||
+            (data.managerEmail as string);
+
+          if (supervisorEmail) {
+            const supervisorName =
+              (data.supervisor_name as string) ||
+              (data.supervisorName as string) ||
+              supervisorEmail.split("@")[0];
+
+            const approverUser = await findOrCreateUser(
+              supervisorEmail,
+              supervisorName
+            );
+            await db.insert(approvals).values({
+              ticketId: ticket.id,
+              approverId: approverUser.id,
+              approverRole: "manager",
+              status: "pending",
+            });
+          }
+        }
+      } catch (err) {
+        console.error("Error creating approvals from org chart:", err);
+        // Fall back to form supervisor
+        const supervisorEmail =
+          (data.supervisor_email as string) ||
+          (data.manager_email as string);
+        if (supervisorEmail) {
+          const approverUser = await findOrCreateUser(supervisorEmail);
+          await db.insert(approvals).values({
+            ticketId: ticket.id,
+            approverId: approverUser.id,
+            approverRole: "manager",
+            status: "pending",
+          });
+        }
       }
     }
 
@@ -149,7 +208,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         ticketNumber: ticket.ticketNumber,
         title: ticket.title,
         formType: slug,
-        needsApproval,
+        approvalRequired,
       },
     });
 

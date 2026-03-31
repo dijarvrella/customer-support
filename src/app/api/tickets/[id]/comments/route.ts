@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { tickets, ticketComments, auditLog } from "@/lib/db/schema";
+import { tickets, ticketComments, auditLog, users } from "@/lib/db/schema";
 import { auth } from "@/lib/auth";
 import { eq, asc } from "drizzle-orm";
+import { sendTicketCommentEmail } from "@/lib/notifications/email";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -146,6 +147,27 @@ export async function POST(request: NextRequest, context: RouteContext) {
         },
       },
     });
+
+    // Send email notification for non-internal comments to the requester (fire-and-forget)
+    if (!comment.isInternal && session.user.id !== ticket.requesterId) {
+      const requesterUser = await db
+        .select({ email: users.email })
+        .from(users)
+        .where(eq(users.id, ticket.requesterId))
+        .limit(1);
+
+      const requesterEmail = requesterUser[0]?.email;
+      if (requesterEmail) {
+        const commenterName = session.user.name || "IT Support";
+        sendTicketCommentEmail(
+          requesterEmail,
+          ticket.ticketNumber,
+          ticket.title,
+          commenterName,
+          commentBody.trim()
+        ).catch(() => {});
+      }
+    }
 
     return NextResponse.json(commentWithAuthor, { status: 201 });
   } catch (error) {

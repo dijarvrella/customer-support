@@ -3,7 +3,7 @@ import Credentials from "next-auth/providers/credentials";
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
 import { db } from "@/lib/db";
 import { users, tenants } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 // Global admin email - has it_admin across all tenants
 const GLOBAL_ADMIN_EMAIL = "dijar@digitaldisruptor.tech";
@@ -18,9 +18,10 @@ const TENANT_ADMINS: Record<string, string[]> = {
 };
 
 function getRoleForEmail(email: string): string {
-  if (email === GLOBAL_ADMIN_EMAIL) return "it_admin";
+  const emailLower = email.toLowerCase();
+  if (emailLower === GLOBAL_ADMIN_EMAIL.toLowerCase()) return "it_admin";
   for (const [, admins] of Object.entries(TENANT_ADMINS)) {
-    if (admins.includes(email)) return "it_admin";
+    if (admins.some((a) => a.toLowerCase() === emailLower)) return "it_admin";
   }
   return "end_user";
 }
@@ -145,39 +146,67 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           const existing = await db
             .select()
             .from(users)
-            .where(eq(users.email, email))
+            .where(sql`LOWER(${users.email}) = LOWER(${email})`)
             .limit(1);
 
           if (existing.length > 0) {
             token.id = existing[0].id;
-            token.role = existing[0].role;
             token.tenantId = existing[0].tenantId;
 
-            // Update role if it changed (e.g., promoted to admin)
-            if (existing[0].role !== role && role !== "end_user") {
-              await db
-                .update(users)
-                .set({ role, updatedAt: new Date() })
-                .where(eq(users.id, existing[0].id));
-              token.role = role;
+            // Always sync role for known admins, keep existing role otherwise
+            const effectiveRole = role !== "end_user" ? role : existing[0].role;
+            token.role = effectiveRole;
+
+            // Update DB if role, name, or entra ID changed
+            const updates: Record<string, unknown> = { updatedAt: new Date() };
+            if (existing[0].role !== effectiveRole) updates.role = effectiveRole;
+            if (profile.name && existing[0].name !== profile.name) updates.name = profile.name as string;
+            if (profile.sub && !existing[0].entraObjectId) updates.entraObjectId = profile.sub as string;
+            if (!existing[0].tenantId && tenantId) updates.tenantId = tenantId;
+            if (Object.keys(updates).length > 1) {
+              await db.update(users).set(updates).where(eq(users.id, existing[0].id));
             }
           } else {
-            // JIT provision on first SSO login
+            // JIT provision - use ON CONFLICT to prevent duplicates
+            // Normalize email to lowercase for storage
+            const normalizedEmail = email.toLowerCase();
             const newUser = await db
               .insert(users)
               .values({
-                email,
+                email: normalizedEmail,
                 name: (profile.name as string) || email,
                 entraObjectId: profile.sub as string,
                 role,
                 tenantId,
                 isActive: true,
               })
+              .onConflictDoNothing()
               .returning();
+
             if (newUser.length > 0) {
               token.id = newUser[0].id;
               token.role = newUser[0].role;
               token.tenantId = newUser[0].tenantId;
+            } else {
+              // Conflict means user exists with different case - fetch it
+              const conflictUser = await db
+                .select()
+                .from(users)
+                .where(sql`LOWER(${users.email}) = LOWER(${email})`)
+                .limit(1);
+              if (conflictUser.length > 0) {
+                token.id = conflictUser[0].id;
+                token.role = conflictUser[0].role !== "end_user" ? conflictUser[0].role : role;
+                token.tenantId = conflictUser[0].tenantId;
+                // Update the existing record
+                await db.update(users).set({
+                  entraObjectId: profile.sub as string,
+                  name: (profile.name as string) || conflictUser[0].name,
+                  role: token.role as string,
+                  tenantId: tenantId || conflictUser[0].tenantId,
+                  updatedAt: new Date(),
+                }).where(eq(users.id, conflictUser[0].id));
+              }
             }
           }
         } catch (err) {
