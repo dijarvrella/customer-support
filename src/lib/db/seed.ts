@@ -156,6 +156,47 @@ async function seedUsers() {
         tenantId: TENANT_IDS.zimark,
         isActive: true,
       },
+      // Zimark tenant admins
+      {
+        id: "b0000000-0000-0000-0000-000000000001",
+        email: "dijar.v@zimark.io",
+        name: "Dijar V.",
+        role: "it_admin",
+        department: "IT",
+        jobTitle: "IT Administrator",
+        tenantId: TENANT_IDS.zimark,
+        isActive: true,
+      },
+      {
+        id: "b0000000-0000-0000-0000-000000000002",
+        email: "rron.b@zimark.io",
+        name: "Rron B.",
+        role: "it_admin",
+        department: "IT",
+        jobTitle: "IT Administrator",
+        tenantId: TENANT_IDS.zimark,
+        isActive: true,
+      },
+      {
+        id: "b0000000-0000-0000-0000-000000000003",
+        email: "arbnor.m@zimark.io",
+        name: "Arbnor M.",
+        role: "it_admin",
+        department: "IT",
+        jobTitle: "IT Administrator",
+        tenantId: TENANT_IDS.zimark,
+        isActive: true,
+      },
+      // Global admin
+      {
+        id: "c0000000-0000-0000-0000-000000000001",
+        email: "dijar@digitaldisruptor.tech",
+        name: "Dijar (Global Admin)",
+        role: "it_admin",
+        department: "Platform",
+        jobTitle: "Global Administrator",
+        isActive: true,
+      },
     ])
     .onConflictDoNothing();
   console.log("  Users seeded.");
