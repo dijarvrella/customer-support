@@ -229,60 +229,53 @@ export async function POST(request: NextRequest) {
             }
           }
         } else {
-          // ─── NEW MESSAGE → Check dedup, then create ticket ─────────────
+          // ─── NEW MESSAGE → Dedup, then create ticket ───────────────────
 
-          // Dedup: check for recent tickets from same user via Slack
-          // Use Slack ts (unix timestamp) for comparison since DB writes race
-          const currentTs = parseFloat(ts);
-          const recentLink = await db
+          // Add jitter delay (0-800ms) to stagger parallel Slack events
+          // This ensures the first event's DB write commits before others check
+          await new Promise((r) => setTimeout(r, Math.random() * 800));
+
+          // Check if a ticket was just created by a parallel request
+          const recentTicket = await db
             .select({
-              ticketId: slackMessageLinks.ticketId,
-              messageTs: slackMessageLinks.messageTs,
+              id: tickets.id,
+              ticketNumber: tickets.ticketNumber,
+              description: tickets.description,
             })
-            .from(slackMessageLinks)
-            .innerJoin(tickets, eq(slackMessageLinks.ticketId, tickets.id))
+            .from(tickets)
             .where(
               and(
-                eq(slackMessageLinks.channelId, channel),
                 eq(tickets.requesterId, dbUser.id),
                 eq(tickets.source, "slack"),
-                // Compare Slack timestamps: current ts minus window
-                sql`CAST(${slackMessageLinks.messageTs} AS DOUBLE PRECISION) > ${currentTs - DEDUP_WINDOW_SECONDS}`
+                sql`${tickets.createdAt} > NOW() - INTERVAL '${sql.raw(String(DEDUP_WINDOW_SECONDS))} seconds'`
               )
             )
-            .orderBy(desc(slackMessageLinks.messageTs))
+            .orderBy(desc(tickets.createdAt))
             .limit(1);
 
-          if (recentLink.length > 0) {
-            // Merge: append to the recent ticket as a comment instead of creating new
-            const existingTicketId = recentLink[0].ticketId;
+          if (recentTicket.length > 0) {
+            // Merge into existing recent ticket
+            const existing = recentTicket[0];
             await db.insert(ticketComments).values({
-              ticketId: existingTicketId,
+              ticketId: existing.id,
               authorId: dbUser.id,
               body: text,
               isInternal: false,
               source: "slack",
             });
 
-            // Also append to the ticket description
-            const existingTicket = await db.query.tickets.findFirst({
-              where: eq(tickets.id, existingTicketId),
-            });
-            if (existingTicket) {
-              await db
-                .update(tickets)
-                .set({
-                  description: (existingTicket.description || "") + "\n\n" + text,
-                  updatedAt: new Date(),
-                })
-                .where(eq(tickets.id, existingTicketId));
-            }
+            await db
+              .update(tickets)
+              .set({
+                description: (existing.description || "") + "\n\n" + text,
+                updatedAt: new Date(),
+              })
+              .where(eq(tickets.id, existing.id));
 
-            // Store message link
             await db
               .insert(slackMessageLinks)
               .values({
-                ticketId: existingTicketId,
+                ticketId: existing.id,
                 channelId: channel,
                 messageTs: ts,
                 slackUserId,
@@ -294,7 +287,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ ok: true });
           }
 
-          // Create new ticket
+          // No recent ticket found - create new one
           const sla = DEFAULT_SLA.medium;
           const now = new Date();
           const ticketNumber = generateTicketNumber();
