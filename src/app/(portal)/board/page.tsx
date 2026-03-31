@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -15,6 +16,7 @@ import {
   User,
   Clock,
   Loader2,
+  ShieldCheck,
 } from "lucide-react";
 import {
   TICKET_PRIORITIES,
@@ -35,6 +37,7 @@ interface TicketRow {
   title: string;
   status: string;
   priority: string;
+  tags?: string | null;
   createdAt: string;
   updatedAt: string;
   requester: { name: string; email: string } | null;
@@ -133,9 +136,13 @@ export default function BoardPage() {
     fetchTickets();
   }, [myTickets]);
 
-  // Filter tickets
+  // Filter tickets (exclude ISO tickets from main board)
   const filteredTickets = useMemo(() => {
     return tickets.filter((ticket) => {
+      // Exclude ISO tickets - they have their own board
+      if (ticket.tags && ticket.tags.toLowerCase().includes("iso")) {
+        return false;
+      }
       if (
         priorityFilters.size > 0 &&
         !priorityFilters.has(ticket.priority)
@@ -189,14 +196,22 @@ export default function BoardPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-          <LayoutGrid className="h-6 w-6" />
-          Board View
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          Visual overview of ticket statuses
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+            <LayoutGrid className="h-6 w-6" />
+            IT Support Board
+          </h1>
+          <p className="text-muted-foreground mt-1">
+            Visual overview of ticket statuses
+          </p>
+        </div>
+        <Link href="/board/iso">
+          <Button variant="outline" size="sm" className="gap-2">
+            <ShieldCheck className="h-4 w-4 text-sky-600" />
+            ISO 27001 Board
+          </Button>
+        </Link>
       </div>
 
       {/* Filters */}
