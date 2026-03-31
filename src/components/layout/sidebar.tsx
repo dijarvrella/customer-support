@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
 import {
   LayoutDashboard,
+  LayoutGrid,
   BookOpen,
   Ticket,
   PlusCircle,
@@ -156,6 +157,7 @@ export function Sidebar({ user, pendingApprovalCount = 0 }: SidebarProps) {
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/catalog", label: "Service Catalog", icon: BookOpen },
     { href: "/tickets", label: "My Tickets", icon: Ticket },
+    { href: "/board", label: "Board View", icon: LayoutGrid },
     { href: "/tickets/new", label: "Create Ticket", icon: PlusCircle },
     {
       href: "/approvals",
