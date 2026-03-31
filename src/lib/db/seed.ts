@@ -148,8 +148,8 @@ async function seedUsers() {
       },
       {
         id: "00000000-0000-0000-0000-000000000099",
-        email: "zimark-support-admin@zimark.com",
-        name: "Zimark Support Admin",
+        email: "admin@zimark.io",
+        name: "Zimark Admin",
         role: "it_admin",
         department: "IT",
         jobTitle: "Support Administrator",

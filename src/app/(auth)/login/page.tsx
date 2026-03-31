@@ -139,13 +139,13 @@ export default function LoginPage() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="bg-email">Admin Email</Label>
+                    <Label htmlFor="bg-email">Email</Label>
                     <Input
                       id="bg-email"
                       type="email"
                       value={bgEmail}
                       onChange={(e) => setBgEmail(e.target.value)}
-                      placeholder="admin@zimark.com"
+                      placeholder="admin@zimark.io"
                       required
                     />
                   </div>

@@ -75,7 +75,7 @@ if (
 }
 
 // Break-glass emergency admin account
-const BREAK_GLASS_EMAIL = "zimark-support-admin@zimark.com";
+const BREAK_GLASS_EMAIL = "admin@zimark.io";
 const BREAK_GLASS_PASSWORD = process.env.BREAK_GLASS_PASSWORD || "ZimarkBG-Admin2026!";
 
 providers.push(
