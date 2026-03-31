@@ -9,14 +9,54 @@ import {
   jsonb,
   index,
   uniqueIndex,
+  unique,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
+
+// ─── TENANTS ───────────────────────────────────────────────────────────────
+export const tenants = pgTable("tenants", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: varchar("name", { length: 128 }).notNull().unique(),
+  slug: varchar("slug", { length: 64 }).notNull().unique(),
+  domain: varchar("domain", { length: 255 }),
+  logoUrl: varchar("logo_url", { length: 1000 }),
+  primaryColor: varchar("primary_color", { length: 64 }),
+  supportEmail: varchar("support_email", { length: 255 }),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// ─── TENANT OAUTH CONFIGS ──────────────────────────────────────────────────
+export const tenantOauthConfigs = pgTable(
+  "tenant_oauth_configs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    provider: varchar("provider", { length: 64 }).notNull(),
+    clientId: varchar("client_id", { length: 255 }).notNull(),
+    clientSecret: varchar("client_secret", { length: 500 }).notNull(),
+    tenantIdValue: varchar("tenant_id_value", { length: 255 }),
+    issuer: varchar("issuer", { length: 500 }),
+    additionalConfig: jsonb("additional_config"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("idx_tenant_oauth_tenant").on(table.tenantId),
+    unique("uq_tenant_oauth_provider").on(table.tenantId, table.provider),
+  ]
+);
 
 // ─── USERS ──────────────────────────────────────────────────────────────────
 export const users = pgTable(
   "users",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").references(() => tenants.id),
     email: varchar("email", { length: 255 }).notNull().unique(),
     name: varchar("name", { length: 255 }).notNull(),
     password: varchar("password", { length: 255 }), // hashed, null for SSO-only
@@ -39,18 +79,24 @@ export const users = pgTable(
     index("idx_users_email").on(table.email),
     index("idx_users_role").on(table.role),
     index("idx_users_slack").on(table.slackUserId),
+    index("idx_users_tenant").on(table.tenantId),
   ]
 );
 
 // ─── TEAMS ──────────────────────────────────────────────────────────────────
-export const teams = pgTable("teams", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  name: varchar("name", { length: 128 }).notNull().unique(),
-  description: text("description"),
-  leadId: uuid("lead_id").references(() => users.id),
-  isActive: boolean("is_active").notNull().default(true),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+export const teams = pgTable(
+  "teams",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").references(() => tenants.id),
+    name: varchar("name", { length: 128 }).notNull().unique(),
+    description: text("description"),
+    leadId: uuid("lead_id").references(() => users.id),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [index("idx_teams_tenant").on(table.tenantId)]
+);
 
 export const teamMemberships = pgTable("team_memberships", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -65,39 +111,50 @@ export const teamMemberships = pgTable("team_memberships", {
 });
 
 // ─── QUEUES ─────────────────────────────────────────────────────────────────
-export const queues = pgTable("queues", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  name: varchar("name", { length: 128 }).notNull().unique(),
-  teamId: uuid("team_id")
-    .notNull()
-    .references(() => teams.id),
-  description: text("description"),
-  autoAssign: boolean("auto_assign").notNull().default(false),
-  assignmentStrategy: varchar("assignment_strategy", { length: 32 }).default(
-    "manual"
-  ),
-  isActive: boolean("is_active").notNull().default(true),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+export const queues = pgTable(
+  "queues",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").references(() => tenants.id),
+    name: varchar("name", { length: 128 }).notNull().unique(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id),
+    description: text("description"),
+    autoAssign: boolean("auto_assign").notNull().default(false),
+    assignmentStrategy: varchar("assignment_strategy", { length: 32 }).default(
+      "manual"
+    ),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [index("idx_queues_tenant").on(table.tenantId)]
+);
 
 // ─── CATEGORIES ─────────────────────────────────────────────────────────────
-export const categories = pgTable("categories", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  name: varchar("name", { length: 128 }).notNull(),
-  slug: varchar("slug", { length: 128 }).notNull().unique(),
-  description: text("description"),
-  parentId: uuid("parent_id"),
-  defaultQueueId: uuid("default_queue_id").references(() => queues.id),
-  isActive: boolean("is_active").notNull().default(true),
-  displayOrder: integer("display_order").default(0),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+export const categories = pgTable(
+  "categories",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").references(() => tenants.id),
+    name: varchar("name", { length: 128 }).notNull(),
+    slug: varchar("slug", { length: 128 }).notNull().unique(),
+    description: text("description"),
+    parentId: uuid("parent_id"),
+    defaultQueueId: uuid("default_queue_id").references(() => queues.id),
+    isActive: boolean("is_active").notNull().default(true),
+    displayOrder: integer("display_order").default(0),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [index("idx_categories_tenant").on(table.tenantId)]
+);
 
 // ─── TICKETS ────────────────────────────────────────────────────────────────
 export const tickets = pgTable(
   "tickets",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").references(() => tenants.id),
     ticketNumber: varchar("ticket_number", { length: 20 }).notNull().unique(),
     title: varchar("title", { length: 500 }).notNull(),
     description: text("description"),
@@ -132,6 +189,7 @@ export const tickets = pgTable(
     index("idx_tickets_assignee").on(table.assigneeId),
     index("idx_tickets_queue").on(table.queueId),
     index("idx_tickets_created").on(table.createdAt),
+    index("idx_tickets_tenant").on(table.tenantId),
   ]
 );
 
@@ -247,7 +305,27 @@ export const auditLog = pgTable(
 );
 
 // ─── RELATIONS ──────────────────────────────────────────────────────────────
+export const tenantsRelations = relations(tenants, ({ many }) => ({
+  users: many(users),
+  tickets: many(tickets),
+  oauthConfigs: many(tenantOauthConfigs),
+}));
+
+export const tenantOauthConfigsRelations = relations(
+  tenantOauthConfigs,
+  ({ one }) => ({
+    tenant: one(tenants, {
+      fields: [tenantOauthConfigs.tenantId],
+      references: [tenants.id],
+    }),
+  })
+);
+
 export const usersRelations = relations(users, ({ many, one }) => ({
+  tenant: one(tenants, {
+    fields: [users.tenantId],
+    references: [tenants.id],
+  }),
   requestedTickets: many(tickets, { relationName: "requester" }),
   assignedTickets: many(tickets, { relationName: "assignee" }),
   comments: many(ticketComments),
@@ -260,6 +338,10 @@ export const usersRelations = relations(users, ({ many, one }) => ({
 }));
 
 export const ticketsRelations = relations(tickets, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [tickets.tenantId],
+    references: [tenants.id],
+  }),
   requester: one(users, {
     fields: [tickets.requesterId],
     references: [users.id],

@@ -1,7 +1,7 @@
-<svg width="140" height="32" viewBox="0 0 140 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect width="32" height="32" rx="6" fill="#1a1a2e"/>
-  <path d="M8 10L16 22L24 10" stroke="#e2e8f0" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M10 10H22" stroke="#e2e8f0" stroke-width="2.5" stroke-linecap="round"/>
-  <text x="40" y="22" font-family="Inter, system-ui, sans-serif" font-weight="700" font-size="18" fill="#1a1a2e">Zimark</text>
-  <text x="102" y="22" font-family="Inter, system-ui, sans-serif" font-weight="400" font-size="12" fill="#64748b">ITSM</text>
+<svg width="160" height="36" viewBox="0 0 160 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="36" height="36" rx="8" fill="#1a1a2e"/>
+  <path d="M9 11L18 25L27 11" stroke="#6366f1" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M11 11H25" stroke="#6366f1" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="18" cy="18" r="2" fill="#818cf8"/>
+  <text x="44" y="24" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="20" fill="#1a1a2e" letter-spacing="-0.5">Zimark</text>
 </svg>

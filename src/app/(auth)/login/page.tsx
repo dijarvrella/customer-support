@@ -13,51 +13,36 @@ import {
   CardContent,
   CardFooter,
 } from "@/components/ui/card";
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Shield, LogIn } from "lucide-react";
-import { getBranding } from "@/lib/branding";
-
-const branding = getBranding();
-
-const DEMO_USERS = [
-  { email: "admin@company.com", label: "IT Admin" },
-  { email: "agent@company.com", label: "IT Agent" },
-  { email: "user@company.com", label: "John Employee" },
-  { email: "hr@company.com", label: "Sarah HR" },
-  { email: "security@company.com", label: "Security Reviewer" },
-];
+import { LogIn, KeyRound } from "lucide-react";
+import Image from "next/image";
 
 export default function LoginPage() {
-  const [email, setEmail] = useState("admin@company.com");
-  const [password] = useState("demo");
   const [isLoading, setIsLoading] = useState(false);
+  const [showBreakGlass, setShowBreakGlass] = useState(false);
+  const [bgEmail, setBgEmail] = useState("");
+  const [bgPassword, setBgPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  const hasMicrosoftEntra =
-    typeof window !== "undefined" &&
-    !!process.env.NEXT_PUBLIC_AZURE_AD_ENABLED;
+  async function handleMicrosoftLogin() {
+    setIsLoading(true);
+    await signIn("microsoft-entra-id", { callbackUrl: "/dashboard" });
+  }
 
-  async function handleCredentialsLogin(e: React.FormEvent) {
+  async function handleBreakGlassLogin(e: React.FormEvent) {
     e.preventDefault();
     setIsLoading(true);
     setError(null);
 
     try {
       const result = await signIn("credentials", {
-        email,
-        password,
+        email: bgEmail,
+        password: bgPassword,
         redirect: false,
       });
 
       if (result && "error" in result && result.error) {
-        setError("Invalid credentials. Please try again.");
+        setError("Invalid credentials.");
         setIsLoading(false);
       } else {
         window.location.href = "/dashboard";
@@ -68,101 +53,47 @@ export default function LoginPage() {
     }
   }
 
-  async function handleMicrosoftLogin() {
-    setIsLoading(true);
-    await signIn("microsoft-entra-id");
-  }
-
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 px-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary text-primary-foreground mb-4">
-            <Shield className="h-8 w-8" />
+          <div className="flex justify-center mb-4">
+            <Image
+              src="/logo.svg"
+              alt="Zimark"
+              width={180}
+              height={40}
+              priority
+            />
           </div>
-          <h1 className="text-3xl font-bold tracking-tight text-foreground">
-            {branding.orgName} ITSM
-          </h1>
-          <p className="text-muted-foreground mt-1">{branding.portalSubtitle}</p>
+          <p className="text-muted-foreground mt-1">
+            IT Service Management Portal
+          </p>
         </div>
 
         <Card>
           <CardHeader className="text-center">
             <CardTitle className="text-xl">Sign In</CardTitle>
             <CardDescription>
-              Select a demo user to explore the portal
+              Use your corporate Microsoft account to access the portal
             </CardDescription>
           </CardHeader>
 
-          <CardContent>
-            <form onSubmit={handleCredentialsLogin} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">Demo User</Label>
-                <Select value={email} onValueChange={setEmail}>
-                  <SelectTrigger id="email">
-                    <SelectValue placeholder="Select a demo user" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {DEMO_USERS.map((user) => (
-                      <SelectItem key={user.email} value={user.email}>
-                        {user.label} ({user.email})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  readOnly
-                  className="bg-muted"
-                />
-              </div>
-
-              {error && (
-                <p className="text-sm text-destructive text-center">{error}</p>
-              )}
-
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <span className="flex items-center gap-2">
-                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                    Signing in...
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-2">
-                    <LogIn className="h-4 w-4" />
-                    Sign In
-                  </span>
-                )}
-              </Button>
-            </form>
-
-            {hasMicrosoftEntra && (
-              <>
-                <div className="relative my-6">
-                  <Separator />
-                  <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-3 text-xs text-muted-foreground">
-                    or
-                  </span>
-                </div>
-
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={handleMicrosoftLogin}
-                  disabled={isLoading}
-                >
+          <CardContent className="space-y-4">
+            <Button
+              className="w-full h-12 text-base"
+              onClick={handleMicrosoftLogin}
+              disabled={isLoading}
+            >
+              {isLoading && !showBreakGlass ? (
+                <span className="flex items-center gap-2">
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                  Redirecting to Microsoft...
+                </span>
+              ) : (
+                <span className="flex items-center gap-2">
                   <svg
-                    className="mr-2 h-4 w-4"
+                    className="h-5 w-5"
                     viewBox="0 0 21 21"
                     fill="none"
                     xmlns="http://www.w3.org/2000/svg"
@@ -173,14 +104,86 @@ export default function LoginPage() {
                     <rect x="11" y="11" width="9" height="9" fill="#FFB900" />
                   </svg>
                   Sign in with Microsoft
-                </Button>
+                </span>
+              )}
+            </Button>
+
+            {!showBreakGlass && (
+              <div className="text-center">
+                <button
+                  type="button"
+                  onClick={() => setShowBreakGlass(true)}
+                  className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+                >
+                  <KeyRound className="h-3 w-3" />
+                  Emergency admin access
+                </button>
+              </div>
+            )}
+
+            {showBreakGlass && (
+              <>
+                <div className="relative my-2">
+                  <Separator />
+                  <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-3 text-xs text-muted-foreground">
+                    Emergency Access
+                  </span>
+                </div>
+
+                <form onSubmit={handleBreakGlassLogin} className="space-y-3">
+                  <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
+                    <p className="text-xs text-amber-800">
+                      Break-glass accounts are for emergency admin access only.
+                      All actions are logged and audited.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="bg-email">Admin Email</Label>
+                    <Input
+                      id="bg-email"
+                      type="email"
+                      value={bgEmail}
+                      onChange={(e) => setBgEmail(e.target.value)}
+                      placeholder="admin@zimark.com"
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="bg-password">Password</Label>
+                    <Input
+                      id="bg-password"
+                      type="password"
+                      value={bgPassword}
+                      onChange={(e) => setBgPassword(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  {error && (
+                    <p className="text-sm text-destructive text-center">
+                      {error}
+                    </p>
+                  )}
+
+                  <Button
+                    type="submit"
+                    variant="outline"
+                    className="w-full"
+                    disabled={isLoading}
+                  >
+                    <LogIn className="h-4 w-4 mr-2" />
+                    {isLoading ? "Signing in..." : "Sign In"}
+                  </Button>
+                </form>
               </>
             )}
           </CardContent>
 
           <CardFooter className="justify-center">
             <p className="text-xs text-muted-foreground">
-              Demo environment &mdash; no real data is stored
+              Zimark IT Support Portal
             </p>
           </CardFooter>
         </Card>

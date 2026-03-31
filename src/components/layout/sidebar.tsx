@@ -171,6 +171,7 @@ export function Sidebar({ user, pendingApprovalCount = 0 }: SidebarProps) {
 
   const adminNav: NavItemDef[] = [
     { href: "/admin/users", label: "Users", icon: Users },
+    { href: "/admin/tenants", label: "Tenants", icon: Shield },
     { href: "/admin", label: "Settings", icon: Settings },
   ];
 
@@ -178,7 +179,7 @@ export function Sidebar({ user, pendingApprovalCount = 0 }: SidebarProps) {
     <div className="flex h-full flex-col">
       {/* Brand */}
       <div className="flex h-16 items-center gap-2 border-b px-6">
-        <Shield className="h-6 w-6 text-primary" />
+        <img src="/logo-icon.svg" alt="Zimark" className="h-8 w-8" />
         <span className="text-lg font-bold tracking-tight">Zimark ITSM</span>
       </div>
 

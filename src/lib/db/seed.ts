@@ -54,7 +54,42 @@ const TICKET_IDS = {
   t10: "40000000-0000-0000-0000-000000000010",
 };
 
+const TENANT_IDS = {
+  zimark: "a0000000-0000-0000-0000-000000000001",
+  demo: "a0000000-0000-0000-0000-000000000002",
+};
+
 // ─── SEED FUNCTIONS ────────────────────────────────────────────────────────
+
+async function seedTenants() {
+  console.log("Seeding tenants...");
+  await db
+    .insert(schema.tenants)
+    .values([
+      {
+        id: TENANT_IDS.zimark,
+        name: "Zimark",
+        slug: "zimark",
+        domain: "zimark.link",
+        logoUrl: "/logo.svg",
+        primaryColor: "222.2 47.4% 11.2%",
+        supportEmail: "it-support@zimark.com",
+        isActive: true,
+      },
+      {
+        id: TENANT_IDS.demo,
+        name: "Demo Company",
+        slug: "demo",
+        domain: "demo-company.com",
+        logoUrl: "/logo-icon.svg",
+        primaryColor: "262.1 83.3% 57.8%",
+        supportEmail: "support@demo-company.com",
+        isActive: true,
+      },
+    ])
+    .onConflictDoNothing();
+  console.log("  Tenants seeded.");
+}
 
 async function seedUsers() {
   console.log("Seeding users...");
@@ -63,47 +98,62 @@ async function seedUsers() {
     .values([
       {
         id: USER_IDS.admin,
-        email: "admin@company.com",
-        name: "IT Admin",
+        email: "admin@demo-company.com",
+        name: "Demo IT Admin",
         role: "it_admin",
         department: "IT",
         jobTitle: "IT Administrator",
+        tenantId: TENANT_IDS.demo,
         isActive: true,
       },
       {
         id: USER_IDS.agent,
-        email: "agent@company.com",
-        name: "IT Agent",
+        email: "agent@demo-company.com",
+        name: "Demo IT Agent",
         role: "it_agent",
         department: "IT",
         jobTitle: "IT Support Agent",
+        tenantId: TENANT_IDS.demo,
         isActive: true,
       },
       {
         id: USER_IDS.user,
-        email: "user@company.com",
+        email: "user@demo-company.com",
         name: "John Employee",
         role: "end_user",
         department: "R&D",
         jobTitle: "Software Engineer",
+        tenantId: TENANT_IDS.demo,
         isActive: true,
       },
       {
         id: USER_IDS.hr,
-        email: "hr@company.com",
+        email: "hr@demo-company.com",
         name: "Sarah HR",
         role: "hr",
         department: "HR",
         jobTitle: "HR Manager",
+        tenantId: TENANT_IDS.demo,
         isActive: true,
       },
       {
         id: USER_IDS.security,
-        email: "security@company.com",
+        email: "security@demo-company.com",
         name: "Security Reviewer",
         role: "security",
         department: "Security",
         jobTitle: "Security Analyst",
+        tenantId: TENANT_IDS.demo,
+        isActive: true,
+      },
+      {
+        id: "00000000-0000-0000-0000-000000000099",
+        email: "zimark-support-admin@zimark.com",
+        name: "Zimark Support Admin",
+        role: "it_admin",
+        department: "IT",
+        jobTitle: "Support Administrator",
+        tenantId: TENANT_IDS.zimark,
         isActive: true,
       },
     ])
@@ -637,6 +687,7 @@ async function main() {
   console.log("Starting seed...\n");
 
   try {
+    await seedTenants();
     await seedUsers();
     await seedTeams();
     await seedQueues();
