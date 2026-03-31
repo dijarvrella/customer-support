@@ -107,7 +107,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       }
     }
 
-    const allowedFields = ["status", "priority", "assigneeId", "queueId", "categorySlug"] as const;
+    const allowedFields = ["status", "priority", "assigneeId", "queueId", "categorySlug", "requesterId"] as const;
     type AllowedField = (typeof allowedFields)[number];
     const updates: Partial<Record<AllowedField, string | null>> = {};
     const historyEntries: {

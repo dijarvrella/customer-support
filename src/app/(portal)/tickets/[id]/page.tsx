@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -150,6 +151,13 @@ export default function TicketDetailPage() {
   const [changingStatus, setChangingStatus] = useState(false);
 
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
+  const [userSearch, setUserSearch] = useState("");
+  const [userResults, setUserResults] = useState<Array<{ id: string; name: string; email: string }>>([]);
+  const [searchingUsers, setSearchingUsers] = useState(false);
+
+  const [requesterDialogOpen, setRequesterDialogOpen] = useState(false);
+  const [requesterSearch, setRequesterSearch] = useState("");
+  const [requesterResults, setRequesterResults] = useState<Array<{ id: string; name: string; email: string }>>([]);
 
   const [approvalDialogOpen, setApprovalDialogOpen] = useState(false);
   const [approvalDecision, setApprovalDecision] = useState<string>("");
@@ -242,15 +250,52 @@ export default function TicketDetailPage() {
     }
   }
 
-  async function handleAssignToMe() {
+  async function searchUsers(query: string, target: "assign" | "requester") {
+    if (query.length < 2) {
+      target === "assign" ? setUserResults([]) : setRequesterResults([]);
+      return;
+    }
+    setSearchingUsers(true);
+    try {
+      const res = await fetch(`/api/users?search=${encodeURIComponent(query)}&limit=10`);
+      if (res.ok) {
+        const data = await res.json();
+        const results = data.map((u: any) => ({ id: u.id, name: u.name, email: u.email }));
+        target === "assign" ? setUserResults(results) : setRequesterResults(results);
+      }
+    } finally {
+      setSearchingUsers(false);
+    }
+  }
+
+  async function handleAssignToUser(userId: string) {
     try {
       const res = await fetch(`/api/tickets/${ticketId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assigneeId: currentUser?.id }),
+        body: JSON.stringify({ assigneeId: userId }),
       });
       if (!res.ok) throw new Error("Failed to assign ticket");
       setAssignDialogOpen(false);
+      setUserSearch("");
+      setUserResults([]);
+      await fetchTicket();
+    } catch {
+      // silent
+    }
+  }
+
+  async function handleChangeRequester(userId: string) {
+    try {
+      const res = await fetch(`/api/tickets/${ticketId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requesterId: userId }),
+      });
+      if (!res.ok) throw new Error("Failed to change requester");
+      setRequesterDialogOpen(false);
+      setRequesterSearch("");
+      setRequesterResults([]);
       await fetchTicket();
     } catch {
       // silent
@@ -368,7 +413,7 @@ export default function TicketDetailPage() {
               </Button>
             ))}
 
-            <Dialog open={assignDialogOpen} onOpenChange={setAssignDialogOpen}>
+            <Dialog open={assignDialogOpen} onOpenChange={(open) => { setAssignDialogOpen(open); if (!open) { setUserSearch(""); setUserResults([]); } }}>
               <DialogTrigger asChild>
                 <Button variant="outline" size="sm">
                   <UserPlus className="h-3 w-3 mr-1" />
@@ -379,18 +424,33 @@ export default function TicketDetailPage() {
                 <DialogHeader>
                   <DialogTitle>Assign Ticket</DialogTitle>
                   <DialogDescription>
-                    Assign this ticket to yourself
+                    Search for a user to assign this ticket to
                   </DialogDescription>
                 </DialogHeader>
-                <DialogFooter>
-                  <Button
-                    variant="outline"
-                    onClick={() => setAssignDialogOpen(false)}
-                  >
-                    Cancel
+                <div className="space-y-3">
+                  <Button variant="outline" className="w-full" onClick={() => handleAssignToUser(currentUser?.id || "")}>
+                    Assign to Me
                   </Button>
-                  <Button onClick={handleAssignToMe}>Assign to Me</Button>
-                </DialogFooter>
+                  <Separator />
+                  <Input
+                    placeholder="Search by name or email..."
+                    value={userSearch}
+                    onChange={(e) => { setUserSearch(e.target.value); searchUsers(e.target.value, "assign"); }}
+                  />
+                  {searchingUsers && <p className="text-xs text-muted-foreground">Searching...</p>}
+                  <div className="max-h-48 overflow-y-auto space-y-1">
+                    {userResults.map((u) => (
+                      <button
+                        key={u.id}
+                        onClick={() => handleAssignToUser(u.id)}
+                        className="w-full text-left p-2 rounded-md hover:bg-accent flex items-center justify-between text-sm"
+                      >
+                        <span className="font-medium">{u.name}</span>
+                        <span className="text-xs text-muted-foreground">{u.email}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </DialogContent>
             </Dialog>
           </div>
@@ -749,6 +809,39 @@ export default function TicketDetailPage() {
                 <p className="text-xs font-medium text-muted-foreground flex items-center gap-1">
                   <User className="h-3 w-3" />
                   Requester
+                  {isAgent && (
+                    <Dialog open={requesterDialogOpen} onOpenChange={(open) => { setRequesterDialogOpen(open); if (!open) { setRequesterSearch(""); setRequesterResults([]); } }}>
+                      <DialogTrigger asChild>
+                        <button type="button" className="text-primary hover:underline text-xs ml-1">(change)</button>
+                      </DialogTrigger>
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>Change Requester</DialogTitle>
+                          <DialogDescription>Search for the correct requester</DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-3">
+                          <Input
+                            placeholder="Search by name or email..."
+                            value={requesterSearch}
+                            onChange={(e) => { setRequesterSearch(e.target.value); searchUsers(e.target.value, "requester"); }}
+                          />
+                          <div className="max-h-48 overflow-y-auto space-y-1">
+                            {requesterResults.map((u) => (
+                              <button
+                                key={u.id}
+                                type="button"
+                                onClick={() => handleChangeRequester(u.id)}
+                                className="w-full text-left p-2 rounded-md hover:bg-accent flex items-center justify-between text-sm"
+                              >
+                                <span className="font-medium">{u.name}</span>
+                                <span className="text-xs text-muted-foreground">{u.email}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </DialogContent>
+                    </Dialog>
+                  )}
                 </p>
                 <p className="text-sm font-medium">
                   {ticket.requester?.name || "Unknown"}
@@ -771,12 +864,20 @@ export default function TicketDetailPage() {
                 <p className="text-xs font-medium text-muted-foreground flex items-center gap-1">
                   <UserPlus className="h-3 w-3" />
                   Assigned To
+                  {isAgent && (
+                    <button type="button" onClick={() => setAssignDialogOpen(true)} className="text-primary hover:underline text-xs ml-1">(change)</button>
+                  )}
                 </p>
                 <p className="text-sm">
                   {ticket.assignee?.name || (
                     <span className="text-muted-foreground">Unassigned</span>
                   )}
                 </p>
+                {ticket.assignee?.email && (
+                  <p className="text-xs text-muted-foreground">
+                    {ticket.assignee.email}
+                  </p>
+                )}
               </div>
 
               <Separator />
