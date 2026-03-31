@@ -34,11 +34,11 @@ providers.push(
     },
     async authorize(credentials) {
       const demoUsers = [
-        { id: "usr-admin-001", email: "admin@company.com", name: "IT Admin", role: "it_admin", image: null },
-        { id: "usr-agent-001", email: "agent@company.com", name: "IT Agent", role: "it_agent", image: null },
-        { id: "usr-user-001", email: "user@company.com", name: "John Employee", role: "end_user", image: null },
-        { id: "usr-hr-001", email: "hr@company.com", name: "Sarah HR", role: "hr", image: null },
-        { id: "usr-security-001", email: "security@company.com", name: "Security Reviewer", role: "security", image: null },
+        { id: "00000000-0000-0000-0000-000000000001", email: "admin@company.com", name: "IT Admin", role: "it_admin", image: null },
+        { id: "00000000-0000-0000-0000-000000000002", email: "agent@company.com", name: "IT Agent", role: "it_agent", image: null },
+        { id: "00000000-0000-0000-0000-000000000003", email: "user@company.com", name: "John Employee", role: "end_user", image: null },
+        { id: "00000000-0000-0000-0000-000000000004", email: "hr@company.com", name: "Sarah HR", role: "hr", image: null },
+        { id: "00000000-0000-0000-0000-000000000005", email: "security@company.com", name: "Security Reviewer", role: "security", image: null },
       ];
 
       const email = credentials?.email as string;
