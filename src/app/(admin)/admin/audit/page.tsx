@@ -94,9 +94,11 @@ export default function AuditLogPage() {
 
       const res = await fetch(`/api/audit?${params.toString()}`);
       if (!res.ok) throw new Error("Failed to fetch audit logs");
-      const data: AuditResponse = await res.json();
-      setEntries(data.data);
-      setTotal(data.total);
+      const json = await res.json();
+      // API returns { data, nextCursor, hasMore } (cursor-based), not { total }
+      const items: AuditEntry[] = Array.isArray(json) ? json : (json.data ?? []);
+      setEntries(items);
+      setTotal(items.length);
     } catch {
       setEntries([]);
       setTotal(0);

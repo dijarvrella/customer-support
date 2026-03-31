@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { auditLog, users } from "@/lib/db/schema";
 import { auth } from "@/lib/auth";
-import { eq, and, desc, gte, lte, lt, sql } from "drizzle-orm";
+import { eq, and, desc, gte, lte, lt, sql, ilike } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
   try {
@@ -35,13 +35,13 @@ export async function GET(request: NextRequest) {
     const conditions: ReturnType<typeof eq>[] = [];
 
     if (entityType) {
-      conditions.push(eq(auditLog.entityType, entityType));
+      conditions.push(ilike(auditLog.entityType, entityType));
     }
     if (entityId) {
       conditions.push(eq(auditLog.entityId, entityId));
     }
     if (eventType) {
-      conditions.push(eq(auditLog.eventType, eventType));
+      conditions.push(ilike(auditLog.eventType, `%${eventType}%`));
     }
     if (actorId) {
       conditions.push(eq(auditLog.actorId, actorId));

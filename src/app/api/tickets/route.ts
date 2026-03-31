@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { tickets, auditLog, users } from "@/lib/db/schema";
+import { tickets, auditLog, users, teams, teamMemberships, ticketComments, ticketHistory } from "@/lib/db/schema";
 import { auth } from "@/lib/auth";
-import { eq, desc, asc, and, or, like, lt } from "drizzle-orm";
+import { eq, desc, asc, and, or, like, lt, sql, count } from "drizzle-orm";
 import { generateTicketNumber } from "@/lib/utils";
 import { DEFAULT_SLA, type TicketPriority } from "@/lib/constants";
 
@@ -201,6 +201,117 @@ export async function POST(request: NextRequest) {
         source: created.source,
       },
     });
+
+    // Auto-assignment: round-robin across IT Operations team
+    try {
+      const itOpsTeam = await db
+        .select({ id: teams.id })
+        .from(teams)
+        .where(eq(teams.name, "IT Operations"))
+        .limit(1);
+
+      if (itOpsTeam.length > 0) {
+        const teamId = itOpsTeam[0].id;
+
+        // Get all active members of the IT Operations team
+        const members = await db
+          .select({
+            userId: teamMemberships.userId,
+            userName: users.name,
+          })
+          .from(teamMemberships)
+          .innerJoin(users, eq(teamMemberships.userId, users.id))
+          .where(
+            and(
+              eq(teamMemberships.teamId, teamId),
+              eq(users.isActive, true)
+            )
+          );
+
+        if (members.length > 0) {
+          // Round-robin: count open tickets per member, assign to one with fewest
+          const openStatuses = ["new", "triaged", "in_progress", "pending_info", "pending_vendor"];
+          const memberIds = members.map((m) => m.userId);
+
+          const ticketCounts = await db
+            .select({
+              assigneeId: tickets.assigneeId,
+              ticketCount: count(tickets.id),
+            })
+            .from(tickets)
+            .where(
+              and(
+                sql`${tickets.assigneeId} IN (${sql.join(memberIds.map(id => sql`${id}`), sql`, `)})`,
+                sql`${tickets.status} IN (${sql.join(openStatuses.map(s => sql`${s}`), sql`, `)})`
+              )
+            )
+            .groupBy(tickets.assigneeId);
+
+          const countMap = new Map<string, number>();
+          for (const tc of ticketCounts) {
+            if (tc.assigneeId) {
+              countMap.set(tc.assigneeId, Number(tc.ticketCount));
+            }
+          }
+
+          // Find member with fewest open tickets
+          let bestMember = members[0];
+          let bestCount = countMap.get(members[0].userId) ?? 0;
+          for (const m of members) {
+            const c = countMap.get(m.userId) ?? 0;
+            if (c < bestCount) {
+              bestCount = c;
+              bestMember = m;
+            }
+          }
+
+          // Update the ticket with assignee
+          await db
+            .update(tickets)
+            .set({ assigneeId: bestMember.userId, status: "triaged" })
+            .where(eq(tickets.id, created.id));
+
+          // Log the auto-assignment to ticket_history
+          await db.insert(ticketHistory).values({
+            ticketId: created.id,
+            actorId: null,
+            fieldName: "assigneeId",
+            oldValue: null,
+            newValue: bestMember.userId,
+            changeType: "auto_assignment",
+          });
+
+          await db.insert(ticketHistory).values({
+            ticketId: created.id,
+            actorId: null,
+            fieldName: "status",
+            oldValue: "new",
+            newValue: "triaged",
+            changeType: "auto_assignment",
+          });
+
+          // Update the created object to reflect changes
+          created.assigneeId = bestMember.userId;
+          created.status = "triaged";
+        }
+      }
+    } catch (autoAssignError) {
+      // Auto-assignment is best-effort; log but don't fail the ticket creation
+      console.error("Auto-assignment failed:", autoAssignError);
+    }
+
+    // Auto-reply comment
+    try {
+      await db.insert(ticketComments).values({
+        ticketId: created.id,
+        authorId: session.user.id,
+        body: "Thank you for submitting your request. Our IT team has received your ticket and will review it shortly. You'll be notified of any updates.",
+        isInternal: false,
+        source: "system",
+      });
+    } catch (commentError) {
+      console.error("Auto-reply comment failed:", commentError);
+    }
 
     return NextResponse.json(created, { status: 201 });
   } catch (error) {
