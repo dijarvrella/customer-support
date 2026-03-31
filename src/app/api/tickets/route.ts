@@ -1,11 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { tickets, auditLog, users, teams, teamMemberships, ticketComments, ticketHistory } from "@/lib/db/schema";
+import { tickets, auditLog, users, teams, teamMemberships, ticketComments, ticketHistory, approvals } from "@/lib/db/schema";
 import { auth } from "@/lib/auth";
-import { eq, desc, asc, and, or, like, lt, sql, count } from "drizzle-orm";
+import { eq, desc, asc, and, or, like, lt, sql, count, inArray } from "drizzle-orm";
 import { generateTicketNumber } from "@/lib/utils";
 import { DEFAULT_SLA, type TicketPriority } from "@/lib/constants";
 import { sendTicketCreatedEmail, sendTicketAssignedEmail } from "@/lib/notifications/email";
+
+// Security-related category slugs visible to CISO / security role
+const SECURITY_CATEGORIES = [
+  "firewall-change",
+  "network-change",
+  "vpn-request",
+  "security-tool",
+  "aws-iam",
+  "azure-change",
+];
 
 export async function GET(request: NextRequest) {
   try {
@@ -22,18 +32,169 @@ export async function GET(request: NextRequest) {
     const queueId = searchParams.get("queueId");
     const search = searchParams.get("search");
     const source = searchParams.get("source");
+    const view = searchParams.get("view");
     const sort = searchParams.get("sort") || "created_at:desc";
     const cursor = searchParams.get("cursor");
     const limit = Math.min(parseInt(searchParams.get("limit") || "50", 10), 100);
 
     const role = (session.user as Record<string, unknown>).role as string;
 
+    // ── Special view: approvals ────────────────────────────────────────
+    // Returns only tickets where the current user has a pending approval
+    if (view === "approvals") {
+      const pendingApprovalTicketIds = await db
+        .select({ ticketId: approvals.ticketId })
+        .from(approvals)
+        .where(
+          and(
+            eq(approvals.approverId, session.user.id),
+            eq(approvals.status, "pending")
+          )
+        );
+
+      const ticketIds = pendingApprovalTicketIds.map((a) => a.ticketId);
+
+      if (ticketIds.length === 0) {
+        return NextResponse.json({ data: [], nextCursor: null, hasMore: false });
+      }
+
+      const approvalConditions: ReturnType<typeof eq>[] = [
+        inArray(tickets.id, ticketIds),
+      ];
+
+      // Apply standard filters on top
+      if (status) approvalConditions.push(eq(tickets.status, status));
+      if (priority) approvalConditions.push(eq(tickets.priority, priority));
+      if (search) {
+        approvalConditions.push(
+          or(
+            like(tickets.title, `%${search}%`),
+            like(tickets.description, `%${search}%`)
+          )!
+        );
+      }
+      if (cursor) {
+        approvalConditions.push(lt(tickets.createdAt, new Date(cursor)));
+      }
+
+      const [sortField, sortDir] = sort.split(":");
+      const sortColumn =
+        sortField === "updated_at"
+          ? tickets.updatedAt
+          : sortField === "priority"
+            ? tickets.priority
+            : sortField === "status"
+              ? tickets.status
+              : tickets.createdAt;
+      const sortOrder = sortDir === "asc" ? asc(sortColumn) : desc(sortColumn);
+
+      const requester = db
+        .select({
+          id: users.id,
+          name: users.name,
+          email: users.email,
+          image: users.image,
+        })
+        .from(users)
+        .as("requester");
+
+      const assignee = db
+        .select({
+          id: users.id,
+          name: users.name,
+          email: users.email,
+          image: users.image,
+        })
+        .from(users)
+        .as("assignee");
+
+      const results = await db
+        .select({
+          ticket: tickets,
+          requesterName: requester.name,
+          requesterEmail: requester.email,
+          requesterImage: requester.image,
+          assigneeName: assignee.name,
+          assigneeEmail: assignee.email,
+          assigneeImage: assignee.image,
+        })
+        .from(tickets)
+        .leftJoin(requester, eq(tickets.requesterId, requester.id))
+        .leftJoin(assignee, eq(tickets.assigneeId, assignee.id))
+        .where(and(...approvalConditions))
+        .orderBy(sortOrder)
+        .limit(limit + 1);
+
+      const hasMore = results.length > limit;
+      const data = results.slice(0, limit).map((r) => ({
+        ...r.ticket,
+        requester: {
+          name: r.requesterName,
+          email: r.requesterEmail,
+          image: r.requesterImage,
+        },
+        assignee: r.assigneeName
+          ? {
+              name: r.assigneeName,
+              email: r.assigneeEmail,
+              image: r.assigneeImage,
+            }
+          : null,
+      }));
+
+      const nextCursor = hasMore
+        ? data[data.length - 1]?.createdAt?.toISOString()
+        : null;
+
+      return NextResponse.json({ data, nextCursor, hasMore });
+    }
+
+    // ── Standard ticket listing with role-based scoping ────────────────
     const conditions: ReturnType<typeof eq>[] = [];
 
-    // End users can only see their own tickets
     if (role === "end_user") {
+      // End users can only see their own tickets
       conditions.push(eq(tickets.requesterId, session.user.id));
+    } else if (role === "security") {
+      // CISO / Security role: own tickets + security category tickets + tickets where they are an approver
+      const approverTicketIds = await db
+        .select({ ticketId: approvals.ticketId })
+        .from(approvals)
+        .where(eq(approvals.approverId, session.user.id));
+
+      const approverIds = approverTicketIds.map((a) => a.ticketId);
+
+      const securityOr = [
+        eq(tickets.requesterId, session.user.id),
+        inArray(tickets.categorySlug, SECURITY_CATEGORIES),
+      ];
+
+      if (approverIds.length > 0) {
+        securityOr.push(inArray(tickets.id, approverIds));
+      }
+
+      conditions.push(or(...securityOr)!);
+    } else if (role === "approver" || role === "hr") {
+      // Managers / approvers: own tickets + tickets where they are an approver
+      const approverTicketIds = await db
+        .select({ ticketId: approvals.ticketId })
+        .from(approvals)
+        .where(eq(approvals.approverId, session.user.id));
+
+      const approverIds = approverTicketIds.map((a) => a.ticketId);
+
+      if (approverIds.length > 0) {
+        conditions.push(
+          or(
+            eq(tickets.requesterId, session.user.id),
+            inArray(tickets.id, approverIds)
+          )!
+        );
+      } else {
+        conditions.push(eq(tickets.requesterId, session.user.id));
+      }
     }
+    // it_agent, it_lead, it_admin, auditor see all tickets (no requester filter)
 
     if (status) {
       conditions.push(eq(tickets.status, status));

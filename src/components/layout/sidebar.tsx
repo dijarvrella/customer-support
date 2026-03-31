@@ -10,6 +10,7 @@ import {
   Ticket,
   PlusCircle,
   CheckSquare,
+  GitBranch,
   List,
   Inbox,
   Users,
@@ -162,6 +163,7 @@ export function Sidebar({ user, pendingApprovalCount = 0 }: SidebarProps) {
       icon: CheckSquare,
       badge: pendingApprovalCount,
     },
+    { href: "/workflows", label: "Approval Workflows", icon: GitBranch },
   ];
 
   const agentNav: NavItemDef[] = [

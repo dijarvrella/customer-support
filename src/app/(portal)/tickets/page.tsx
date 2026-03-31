@@ -14,10 +14,13 @@ import {
 } from "@/components/ui/select";
 import {
   Card,
-  CardHeader,
-  CardTitle,
   CardContent,
 } from "@/components/ui/card";
+import {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
 import {
   TICKET_STATUSES,
   TICKET_PRIORITIES,
@@ -35,6 +38,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Loader2,
+  ShieldCheck,
 } from "lucide-react";
 
 interface TicketRow {
@@ -43,6 +47,7 @@ interface TicketRow {
   title: string;
   status: string;
   priority: string;
+  tags?: string | null;
   createdAt: string;
   updatedAt: string;
   requester: { name: string; email: string } | null;
@@ -55,11 +60,19 @@ interface TicketResponse {
   hasMore: boolean;
 }
 
+function hasIsoTag(tags: string | null | undefined): boolean {
+  if (!tags) return false;
+  return tags.toLowerCase().includes("iso");
+}
+
 export default function TicketsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const viewAll = searchParams.get("view") === "all";
 
+  const [activeTab, setActiveTab] = useState<"my-tickets" | "approvals">(
+    "my-tickets"
+  );
   const [tickets, setTickets] = useState<TicketRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -69,8 +82,25 @@ export default function TicketsPage() {
   const [cursors, setCursors] = useState<(string | null)[]>([null]);
   const [currentPage, setCurrentPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
+  const [hasApprovals, setHasApprovals] = useState(false);
 
   const pageSize = 20;
+
+  // Check if user has any pending approvals (to decide whether to show the tab)
+  useEffect(() => {
+    async function checkApprovals() {
+      try {
+        const res = await fetch("/api/tickets?view=approvals&limit=1");
+        if (res.ok) {
+          const json: TicketResponse = await res.json();
+          setHasApprovals(json.data.length > 0);
+        }
+      } catch {
+        // Silently fail - just don't show the tab
+      }
+    }
+    checkApprovals();
+  }, []);
 
   const fetchTickets = useCallback(
     async (pageCursor: string | null) => {
@@ -79,6 +109,10 @@ export default function TicketsPage() {
         const params = new URLSearchParams();
         params.set("limit", String(pageSize));
         params.set("sort", "created_at:desc");
+
+        if (activeTab === "approvals") {
+          params.set("view", "approvals");
+        }
 
         if (statusFilter && statusFilter !== "all") {
           params.set("status", statusFilter);
@@ -106,15 +140,19 @@ export default function TicketsPage() {
         setLoading(false);
       }
     },
-    [statusFilter, priorityFilter, searchQuery]
+    [statusFilter, priorityFilter, searchQuery, activeTab]
   );
 
-  // Fetch on filter change
+  // Fetch on filter or tab change
   useEffect(() => {
     setCursors([null]);
     setCurrentPage(0);
     fetchTickets(null);
   }, [fetchTickets]);
+
+  function handleTabChange(value: string) {
+    setActiveTab(value as "my-tickets" | "approvals");
+  }
 
   function handleNextPage() {
     if (!cursor) return;
@@ -135,19 +173,42 @@ export default function TicketsPage() {
     router.push(`/tickets/${id}`);
   }
 
+  const pageTitle =
+    activeTab === "approvals"
+      ? "Needs My Approval"
+      : viewAll
+        ? "All Tickets"
+        : "My Tickets";
+
+  const pageDescription =
+    activeTab === "approvals"
+      ? "Tickets awaiting your approval decision"
+      : viewAll
+        ? "View and manage all tickets in the system"
+        : "Track your submitted support requests";
+
   return (
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">
-          {viewAll ? "All Tickets" : "My Tickets"}
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          {viewAll
-            ? "View and manage all tickets in the system"
-            : "Track your submitted support requests"}
-        </p>
+        <h1 className="text-2xl font-bold tracking-tight">{pageTitle}</h1>
+        <p className="text-muted-foreground mt-1">{pageDescription}</p>
       </div>
+
+      {/* Tabs - shown when user has pending approvals */}
+      {hasApprovals && (
+        <Tabs
+          value={activeTab}
+          onValueChange={handleTabChange}
+        >
+          <TabsList>
+            <TabsTrigger value="my-tickets">My Tickets</TabsTrigger>
+            <TabsTrigger value="approvals">
+              Needs My Approval
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+      )}
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3">
@@ -200,7 +261,11 @@ export default function TicketsPage() {
           ) : tickets.length === 0 ? (
             <div className="text-center py-16 text-muted-foreground">
               <Ticket className="h-10 w-10 mx-auto mb-3 opacity-40" />
-              <p className="text-sm">No tickets found</p>
+              <p className="text-sm">
+                {activeTab === "approvals"
+                  ? "No tickets awaiting your approval"
+                  : "No tickets found"}
+              </p>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -244,7 +309,18 @@ export default function TicketsPage() {
                         {ticket.ticketNumber}
                       </td>
                       <td className="px-4 py-3 font-medium max-w-[250px] truncate">
-                        {ticket.title}
+                        <span className="flex items-center gap-1.5">
+                          {ticket.title}
+                          {hasIsoTag(ticket.tags) && (
+                            <Badge
+                              variant="outline"
+                              className="bg-sky-50 text-sky-700 border-sky-200 text-[10px] px-1.5 py-0 leading-4 font-semibold shrink-0"
+                            >
+                              <ShieldCheck className="h-3 w-3 mr-0.5" />
+                              ISO
+                            </Badge>
+                          )}
+                        </span>
                       </td>
                       <td className="px-4 py-3 hidden sm:table-cell">
                         <Badge

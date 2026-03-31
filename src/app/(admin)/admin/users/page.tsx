@@ -17,7 +17,15 @@ import {
 } from "@/components/ui/card";
 import { USER_ROLES } from "@/lib/constants";
 import { formatDate } from "@/lib/utils";
-import { Search, Users, Loader2 } from "lucide-react";
+import { Search, Users, Loader2, Check } from "lucide-react";
+
+interface UserQueue {
+  queueId: string;
+  queueName: string;
+  teamId: string;
+  teamName: string;
+  membershipRole: string;
+}
 
 interface UserRecord {
   id: string;
@@ -57,6 +65,9 @@ export default function UsersPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
+  const [userQueues, setUserQueues] = useState<Record<string, UserQueue[]>>({});
+  const [updatingRole, setUpdatingRole] = useState<string | null>(null);
+  const [roleUpdateSuccess, setRoleUpdateSuccess] = useState<string | null>(null);
 
   const fetchUsers = useCallback(async () => {
     setLoading(true);
@@ -77,9 +88,55 @@ export default function UsersPage() {
     }
   }, [search, roleFilter]);
 
+  const fetchUserQueues = useCallback(async (userId: string) => {
+    try {
+      const res = await fetch(`/api/users/${userId}/queues`);
+      if (res.ok) {
+        const data = await res.json();
+        setUserQueues((prev) => ({ ...prev, [userId]: data }));
+      }
+    } catch {
+      // silent
+    }
+  }, []);
+
   useEffect(() => {
     fetchUsers();
   }, [fetchUsers]);
+
+  // Fetch queues for all users once they are loaded
+  useEffect(() => {
+    for (const user of users) {
+      if (!userQueues[user.id]) {
+        fetchUserQueues(user.id);
+      }
+    }
+  }, [users, userQueues, fetchUserQueues]);
+
+  const handleRoleChange = async (userId: string, newRole: string) => {
+    setUpdatingRole(userId);
+    setRoleUpdateSuccess(null);
+    try {
+      const res = await fetch(`/api/users/${userId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: newRole }),
+      });
+
+      if (res.ok) {
+        const updated = await res.json();
+        setUsers((prev) =>
+          prev.map((u) => (u.id === userId ? { ...u, role: updated.role } : u))
+        );
+        setRoleUpdateSuccess(userId);
+        setTimeout(() => setRoleUpdateSuccess(null), 2000);
+      }
+    } catch {
+      // silent
+    } finally {
+      setUpdatingRole(null);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -148,6 +205,9 @@ export default function UsersPage() {
                       Role
                     </th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">
+                      Queue(s)
+                    </th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">
                       Department
                     </th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden sm:table-cell">
@@ -162,7 +222,7 @@ export default function UsersPage() {
                   {users.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={6}
+                        colSpan={7}
                         className="px-4 py-16 text-center text-muted-foreground"
                       >
                         <Users className="h-10 w-10 mx-auto mb-3 opacity-40" />
@@ -170,57 +230,104 @@ export default function UsersPage() {
                       </td>
                     </tr>
                   ) : (
-                    users.map((user) => (
-                      <tr
-                        key={user.id}
-                        className="border-b last:border-0 hover:bg-accent/50 transition-colors"
-                      >
-                        <td className="px-4 py-3 font-medium">
-                          <div className="flex items-center gap-3">
-                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
-                              {user.name
-                                .split(" ")
-                                .map((n) => n[0])
-                                .join("")
-                                .toUpperCase()
-                                .slice(0, 2)}
+                    users.map((user) => {
+                      const queues = userQueues[user.id] || [];
+                      return (
+                        <tr
+                          key={user.id}
+                          className="border-b last:border-0 hover:bg-accent/50 transition-colors"
+                        >
+                          <td className="px-4 py-3 font-medium">
+                            <div className="flex items-center gap-3">
+                              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
+                                {user.name
+                                  .split(" ")
+                                  .map((n) => n[0])
+                                  .join("")
+                                  .toUpperCase()
+                                  .slice(0, 2)}
+                              </div>
+                              {user.name}
                             </div>
-                            {user.name}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground">
-                          {user.email}
-                        </td>
-                        <td className="px-4 py-3 hidden md:table-cell">
-                          <Badge
-                            variant="outline"
-                            className={ROLE_COLORS[user.role] || ""}
-                          >
-                            {ROLE_LABELS[user.role] || user.role}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">
-                          {user.department || "-"}
-                        </td>
-                        <td className="px-4 py-3 hidden sm:table-cell">
-                          <Badge
-                            variant="outline"
-                            className={
-                              user.isActive
-                                ? "bg-emerald-100 text-emerald-800 border-emerald-200"
-                                : "bg-gray-100 text-gray-500 border-gray-200"
-                            }
-                          >
-                            {user.isActive ? "Active" : "Inactive"}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-3 hidden xl:table-cell text-muted-foreground text-xs">
-                          {user.lastLoginAt
-                            ? formatDate(user.lastLoginAt)
-                            : "Never"}
-                        </td>
-                      </tr>
-                    ))
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">
+                            {user.email}
+                          </td>
+                          <td className="px-4 py-3 hidden md:table-cell">
+                            <div className="flex items-center gap-2">
+                              <Select
+                                value={user.role}
+                                onValueChange={(value) =>
+                                  handleRoleChange(user.id, value)
+                                }
+                                disabled={updatingRole === user.id}
+                              >
+                                <SelectTrigger
+                                  className={`w-[160px] h-8 text-xs ${
+                                    ROLE_COLORS[user.role] || ""
+                                  }`}
+                                >
+                                  {updatingRole === user.id ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : (
+                                    <SelectValue />
+                                  )}
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {USER_ROLES.map((role) => (
+                                    <SelectItem key={role} value={role}>
+                                      {ROLE_LABELS[role] || role}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              {roleUpdateSuccess === user.id && (
+                                <Check className="h-4 w-4 text-emerald-600" />
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 hidden lg:table-cell">
+                            {queues.length > 0 ? (
+                              <div className="flex flex-wrap gap-1">
+                                {queues.map((q) => (
+                                  <Badge
+                                    key={q.queueId}
+                                    variant="outline"
+                                    className="text-xs"
+                                  >
+                                    {q.queueName}
+                                  </Badge>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground text-xs">
+                                None
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">
+                            {user.department || "-"}
+                          </td>
+                          <td className="px-4 py-3 hidden sm:table-cell">
+                            <Badge
+                              variant="outline"
+                              className={
+                                user.isActive
+                                  ? "bg-emerald-100 text-emerald-800 border-emerald-200"
+                                  : "bg-gray-100 text-gray-500 border-gray-200"
+                              }
+                            >
+                              {user.isActive ? "Active" : "Inactive"}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-3 hidden xl:table-cell text-muted-foreground text-xs">
+                            {user.lastLoginAt
+                              ? formatDate(user.lastLoginAt)
+                              : "Never"}
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
