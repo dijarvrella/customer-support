@@ -5,9 +5,11 @@ import {
   ticketComments,
   ticketHistory,
   auditLog,
+  users,
 } from "@/lib/db/schema";
 import { auth } from "@/lib/auth";
 import { eq, asc } from "drizzle-orm";
+import { sendTicketResolvedEmail, sendNewAssignmentEmail } from "@/lib/notifications/email";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -93,17 +95,34 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
     }
 
-    // End users can only cancel their own tickets
+    // End users: limited actions on their own tickets
     if (role === "end_user") {
       if (existing.requesterId !== session.user.id) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
-      // End users can only update status to cancelled
-      if (body.status && body.status !== "cancelled") {
-        return NextResponse.json(
-          { error: "End users can only cancel their tickets" },
-          { status: 403 }
-        );
+      if (body.status) {
+        // End users can cancel, or reopen resolved tickets within 24h
+        const isCancel = body.status === "cancelled";
+        const isReopen =
+          body.status === "in_progress" &&
+          existing.status === "resolved" &&
+          existing.resolvedAt &&
+          new Date().getTime() - new Date(existing.resolvedAt).getTime() < 24 * 60 * 60 * 1000;
+
+        if (!isCancel && !isReopen) {
+          return NextResponse.json(
+            { error: "You can only cancel or reopen recently resolved tickets" },
+            { status: 403 }
+          );
+        }
+      }
+      // End users can also escalate (change priority)
+      if (body.priority && !body.status) {
+        // Allow priority escalation
+      } else if (body.status) {
+        // Already validated above
+      } else {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
     }
 
@@ -180,6 +199,28 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       }
     };
     bgWork();
+
+    // Email notifications based on what changed
+    const portalUrl = `${request.nextUrl.origin}/tickets/${id}`;
+
+    // Notify requester when ticket is resolved
+    if (updates.status === "resolved" && existing.requesterId) {
+      const requester = await db.select({ email: users.email }).from(users).where(eq(users.id, existing.requesterId)).limit(1);
+      if (requester[0]?.email) {
+        sendTicketResolvedEmail(requester[0].email, existing.ticketNumber, existing.title)
+          .catch((err) => console.error("Resolved email failed:", err));
+      }
+    }
+
+    // Notify assignee when ticket is assigned to them
+    if (updates.assigneeId && updates.assigneeId !== existing.assigneeId) {
+      const assignee = await db.select({ name: users.name, email: users.email }).from(users).where(eq(users.id, updates.assigneeId)).limit(1);
+      if (assignee[0]?.email) {
+        const requesterRecord = await db.select({ name: users.name }).from(users).where(eq(users.id, existing.requesterId)).limit(1);
+        sendNewAssignmentEmail(assignee[0].email, assignee[0].name, existing.ticketNumber, existing.title, requesterRecord[0]?.name || "Someone", portalUrl)
+          .catch((err) => console.error("Assignment email failed:", err));
+      }
+    }
 
     return NextResponse.json(updated);
   } catch (error) {

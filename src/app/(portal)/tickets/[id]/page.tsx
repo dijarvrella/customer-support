@@ -410,6 +410,59 @@ export default function TicketDetailPage() {
           <h1 className="text-2xl font-bold tracking-tight">{ticket.title}</h1>
         </div>
 
+        {/* Reopen button for end users within 24h */}
+        {!isAgent &&
+          ticket.status === "resolved" &&
+          ticket.resolvedAt &&
+          (new Date().getTime() - new Date(ticket.resolvedAt).getTime()) < 24 * 60 * 60 * 1000 && (
+          <div className="flex gap-2 shrink-0">
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={changingStatus !== null}
+              onClick={() => handleStatusChange("in_progress")}
+            >
+              {changingStatus === "in_progress" && <Loader2 className="h-3 w-3 animate-spin mr-1" />}
+              Reopen - Issue Not Resolved
+            </Button>
+          </div>
+        )}
+
+        {/* Escalate button for end users on open tickets */}
+        {!isAgent &&
+          ["new", "triaged", "in_progress", "pending_info"].includes(ticket.status) && (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={changingStatus !== null}
+            onClick={async () => {
+              setChangingStatus("escalate");
+              try {
+                await fetch(`/api/tickets/${ticketId}`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    priority: ticket.priority === "critical" ? "critical" : ticket.priority === "high" ? "critical" : "high",
+                  }),
+                });
+                await fetch(`/api/tickets/${ticketId}/comments`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    body: "This ticket has been escalated by the requester.",
+                    isInternal: false,
+                  }),
+                });
+                await fetchTicket();
+              } catch { /* silent */ } finally { setChangingStatus(null); }
+            }}
+          >
+            {changingStatus === "escalate" && <Loader2 className="h-3 w-3 animate-spin mr-1" />}
+            <AlertTriangle className="h-3 w-3 mr-1" />
+            Escalate
+          </Button>
+        )}
+
         {isAgent && nextStatuses.length > 0 && (
           <div className="flex flex-wrap gap-2 shrink-0">
             {nextStatuses.map((status) => (

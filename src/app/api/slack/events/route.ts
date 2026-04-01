@@ -10,6 +10,7 @@ import {
 import { eq, and, sql, desc } from "drizzle-orm";
 import { generateTicketNumber } from "@/lib/utils";
 import { DEFAULT_SLA } from "@/lib/constants";
+import { sendTicketCreatedEmail, sendNewAssignmentEmail } from "@/lib/notifications/email";
 import crypto from "crypto";
 
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
@@ -340,6 +341,16 @@ export async function POST(request: NextRequest) {
               `Track it here: ${PORTAL_URL}/tickets/${ticket.id}\n` +
               `Priority: Medium | SLA: Response within 4 hours`
           );
+
+          // Email notification to the requester
+          if (dbUser.email && !dbUser.email.endsWith("@slack.local")) {
+            sendTicketCreatedEmail(
+              dbUser.email,
+              ticketNumber,
+              title,
+              `${PORTAL_URL}/tickets/${ticket.id}`
+            ).catch((err) => console.error("Slack ticket email failed:", err));
+          }
         }
       }
     }
