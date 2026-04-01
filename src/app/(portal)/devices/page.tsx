@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Card,
@@ -50,6 +51,46 @@ interface ManagedDevice {
   managedDeviceOwnerType: string;
   enrolledDateTime: string;
   deviceRegistrationState: string;
+}
+
+/**
+ * Map Windows build numbers to friendly OS version names.
+ * Windows 11 reports as "10.0.xxxxx" in Intune which is misleading.
+ */
+function getFriendlyOsVersion(os: string, rawVersion: string): string {
+  if (!rawVersion) return os || "Unknown";
+
+  const osLower = (os || "").toLowerCase();
+
+  if (osLower === "windows") {
+    // Parse build number from "10.0.XXXXX.YYYY" format
+    const parts = rawVersion.split(".");
+    const build = parts.length >= 3 ? parseInt(parts[2], 10) : 0;
+
+    if (build >= 26200) return "Windows 11 24H2";
+    if (build >= 26100) return "Windows 11 24H2";
+    if (build >= 22631) return "Windows 11 23H2";
+    if (build >= 22621) return "Windows 11 22H2";
+    if (build >= 22000) return "Windows 11 21H2";
+    if (build >= 19045) return "Windows 10 22H2";
+    if (build >= 19044) return "Windows 10 21H2";
+    if (build >= 19043) return "Windows 10 21H1";
+    if (build >= 19042) return "Windows 10 20H2";
+    if (build >= 19041) return "Windows 10 2004";
+    return `Windows (Build ${build})`;
+  }
+
+  if (osLower === "macos") {
+    // macOS versions are reported correctly, just clean up
+    const parts = rawVersion.split(".");
+    const major = parseInt(parts[0], 10);
+    if (major >= 15) return `macOS Sequoia ${rawVersion}`;
+    if (major >= 14) return `macOS Sonoma ${rawVersion}`;
+    if (major >= 13) return `macOS Ventura ${rawVersion}`;
+    return `macOS ${rawVersion}`;
+  }
+
+  return `${os} ${rawVersion}`;
 }
 
 function ComplianceBadge({ state }: { state: string }) {
@@ -221,6 +262,41 @@ export default function DevicesPage() {
     return { total, compliant, noncompliant, windows, macOS, other };
   }, [devices]);
 
+  const [creatingComplianceTickets, setCreatingComplianceTickets] = useState(false);
+  const [complianceTicketsResult, setComplianceTicketsResult] = useState<string | null>(null);
+
+  async function handleCreateComplianceTickets() {
+    const noncompliantDevices = devices.filter(
+      (d) => d.complianceState?.toLowerCase() === "noncompliant"
+    );
+    if (noncompliantDevices.length === 0) return;
+
+    setCreatingComplianceTickets(true);
+    setComplianceTicketsResult(null);
+    let created = 0;
+
+    for (const device of noncompliantDevices) {
+      try {
+        const res = await fetch("/api/tickets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: `Non-compliant device: ${device.deviceName}`,
+            description: `Device "${device.deviceName}" (${getFriendlyOsVersion(device.operatingSystem, device.osVersion)}) assigned to ${device.userDisplayName || "Unknown"} is non-compliant.\n\nModel: ${device.model || "-"}\nSerial: ${device.serialNumber || "-"}\nLast sync: ${device.lastSyncDateTime || "-"}\n\nPlease investigate and bring the device into compliance.`,
+            priority: "high",
+            categorySlug: "troubleshooting",
+          }),
+        });
+        if (res.ok) created++;
+      } catch {
+        // continue with next device
+      }
+    }
+
+    setComplianceTicketsResult(`${created} compliance ticket(s) created`);
+    setCreatingComplianceTickets(false);
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -241,16 +317,38 @@ export default function DevicesPage() {
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       {/* Header */}
-      <div className="flex items-center gap-3">
-        <Monitor className="h-6 w-6" />
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            Device Inventory
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Intune managed devices overview
-          </p>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Monitor className="h-6 w-6" />
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">
+              Device Inventory
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              Intune managed devices overview
+            </p>
+          </div>
         </div>
+        {stats.noncompliant > 0 && (
+          <div className="flex items-center gap-2">
+            {complianceTicketsResult && (
+              <span className="text-sm text-emerald-600">{complianceTicketsResult}</span>
+            )}
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={handleCreateComplianceTickets}
+              disabled={creatingComplianceTickets}
+            >
+              {creatingComplianceTickets ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-1" />
+              ) : (
+                <Shield className="h-4 w-4 mr-1" />
+              )}
+              Create Compliance Tickets ({stats.noncompliant})
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Stats Cards */}
@@ -415,13 +513,8 @@ export default function DevicesPage() {
                     <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">
                       {device.userDisplayName || "-"}
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">
-                      <span>{device.operatingSystem || "-"}</span>
-                      {device.osVersion && (
-                        <span className="text-xs ml-1 text-muted-foreground/70">
-                          {device.osVersion}
-                        </span>
-                      )}
+                    <td className="px-4 py-3 text-muted-foreground hidden md:table-cell" title={device.osVersion ? `Raw: ${device.operatingSystem} ${device.osVersion}` : undefined}>
+                      <span>{getFriendlyOsVersion(device.operatingSystem, device.osVersion)}</span>
                     </td>
                     <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">
                       {device.model || "-"}
@@ -485,12 +578,12 @@ export default function DevicesPage() {
                   <div>
                     <p className="text-muted-foreground">Operating System</p>
                     <p className="font-medium">
-                      {selectedDevice.operatingSystem || "-"}
+                      {getFriendlyOsVersion(selectedDevice.operatingSystem, selectedDevice.osVersion)}
                     </p>
                   </div>
                   <div>
-                    <p className="text-muted-foreground">OS Version</p>
-                    <p className="font-medium">
+                    <p className="text-muted-foreground">Build Version</p>
+                    <p className="font-medium font-mono text-sm">
                       {selectedDevice.osVersion || "-"}
                     </p>
                   </div>
