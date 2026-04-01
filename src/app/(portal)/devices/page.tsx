@@ -275,6 +275,21 @@ export default function DevicesPage() {
     setComplianceTicketsResult(null);
     let created = 0;
 
+    // Look up Rron's user ID - compliance tickets always assigned to him
+    let rronId: string | null = null;
+    try {
+      const usersRes = await fetch("/api/users?search=rron");
+      if (usersRes.ok) {
+        const usersData = await usersRes.json();
+        const rron = usersData.find((u: any) =>
+          u.email?.toLowerCase().includes("rron")
+        );
+        if (rron) rronId = rron.id;
+      }
+    } catch {
+      // will create without assignee
+    }
+
     for (const device of noncompliantDevices) {
       try {
         const res = await fetch("/api/tickets", {
@@ -287,13 +302,24 @@ export default function DevicesPage() {
             categorySlug: "troubleshooting",
           }),
         });
-        if (res.ok) created++;
+        if (res.ok && rronId) {
+          const ticket = await res.json();
+          // Assign to Rron
+          await fetch(`/api/tickets/${ticket.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ assigneeId: rronId }),
+          });
+          created++;
+        } else if (res.ok) {
+          created++;
+        }
       } catch {
         // continue with next device
       }
     }
 
-    setComplianceTicketsResult(`${created} compliance ticket(s) created`);
+    setComplianceTicketsResult(`${created} compliance ticket(s) created and assigned to Rron`);
     setCreatingComplianceTickets(false);
   }
 
