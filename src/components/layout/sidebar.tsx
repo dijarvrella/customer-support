@@ -151,6 +151,7 @@ export function Sidebar({ user, pendingApprovalCount = 0 }: SidebarProps) {
 
   const showAgentSection = agentRoles.includes(user.role);
   const showAdminSection = adminRoles.includes(user.role);
+  const showGroupsNav = user.role === "it_admin" || user.role === "hr";
 
   const closeMobile = () => setMobileOpen(false);
 
@@ -222,6 +223,33 @@ export function Sidebar({ user, pendingApprovalCount = 0 }: SidebarProps) {
                   onClick={closeMobile}
                 />
               ))}
+              {showGroupsNav && (
+                <NavLink
+                  href="/groups"
+                  label="Groups"
+                  icon={Users2}
+                  active={isLinkActive(pathname, "/groups")}
+                  onClick={closeMobile}
+                />
+              )}
+            </div>
+          </>
+        )}
+
+        {showGroupsNav && !showAgentSection && (
+          <>
+            <Separator className="my-4" />
+            <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              HR
+            </p>
+            <div className="space-y-1">
+              <NavLink
+                href="/groups"
+                label="Groups"
+                icon={Users2}
+                active={isLinkActive(pathname, "/groups")}
+                onClick={closeMobile}
+              />
             </div>
           </>
         )}
