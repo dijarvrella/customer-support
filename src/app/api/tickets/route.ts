@@ -5,7 +5,7 @@ import { auth } from "@/lib/auth";
 import { eq, desc, asc, and, or, like, lt, sql, count, inArray } from "drizzle-orm";
 import { generateTicketNumber } from "@/lib/utils";
 import { DEFAULT_SLA, type TicketPriority } from "@/lib/constants";
-import { sendTicketCreatedEmail, sendTicketAssignedEmail } from "@/lib/notifications/email";
+import { sendTicketCreatedEmail, sendTicketAssignedEmail, sendNewAssignmentEmail } from "@/lib/notifications/email";
 
 // Security-related category slugs visible to CISO / security role
 const SECURITY_CATEGORIES = [
@@ -480,18 +480,29 @@ export async function POST(request: NextRequest) {
     const portalUrl = `${request.nextUrl.origin}/tickets/${created.id}`;
 
     if (requesterEmail) {
-      sendTicketCreatedEmail(requesterEmail, created.ticketNumber, created.title, portalUrl).catch(() => {});
+      sendTicketCreatedEmail(requesterEmail, created.ticketNumber, created.title, portalUrl)
+        .catch((err) => console.error("Ticket created email failed:", err));
 
       if (created.assigneeId) {
-        // Look up assignee name for the notification
+        // Look up assignee for notification
         const assigneeRecord = await db
-          .select({ name: users.name })
+          .select({ name: users.name, email: users.email })
           .from(users)
           .where(eq(users.id, created.assigneeId))
           .limit(1);
 
         const assigneeName = assigneeRecord[0]?.name || "an IT team member";
-        sendTicketAssignedEmail(requesterEmail, created.ticketNumber, created.title, assigneeName).catch(() => {});
+        const assigneeEmail = assigneeRecord[0]?.email;
+
+        // Notify requester that their ticket was assigned
+        sendTicketAssignedEmail(requesterEmail, created.ticketNumber, created.title, assigneeName)
+          .catch((err) => console.error("Ticket assigned email failed:", err));
+
+        // Notify the assignee about their new ticket
+        if (assigneeEmail) {
+          sendNewAssignmentEmail(assigneeEmail, assigneeName, created.ticketNumber, created.title, session.user.name || "Someone", portalUrl)
+            .catch((err) => console.error("New assignment email failed:", err));
+        }
       }
     }
 

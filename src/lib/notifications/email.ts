@@ -8,7 +8,7 @@ function getResend(): Resend | null {
   return _resend;
 }
 const FROM_EMAIL =
-  process.env.RESEND_FROM_EMAIL || "IT Support <notifications@zimark.io>";
+  process.env.RESEND_FROM_EMAIL || "Zimark IT Support <notifications@zimark.io>";
 
 function emailLayout(content: string): string {
   return `<!DOCTYPE html>
@@ -102,6 +102,38 @@ export async function sendTicketAssignedEmail(
     });
   } catch (error) {
     console.error(`Failed to send ticket assigned email for ${ticketNumber}:`, error);
+  }
+}
+
+export async function sendNewAssignmentEmail(
+  to: string,
+  assigneeName: string,
+  ticketNumber: string,
+  title: string,
+  requesterName: string,
+  portalUrl: string
+): Promise<void> {
+  try {
+    const client = getResend();
+    if (!client) return;
+    const result = await client.emails.send({
+      from: FROM_EMAIL,
+      to,
+      subject: `New ticket assigned to you: ${ticketNumber}`,
+      html: emailLayout(`
+        <h2 style="margin:0 0 16px;font-size:20px;color:#111827;">New Ticket Assigned to You</h2>
+        <p style="margin:0 0 8px;font-size:14px;color:#374151;">Hi ${assigneeName},</p>
+        <p style="margin:0 0 16px;font-size:14px;color:#374151;">A new ticket has been assigned to you:</p>
+        <p style="margin:0 0 8px;font-size:14px;color:#6b7280;"><strong>Ticket:</strong> ${ticketNumber}</p>
+        <p style="margin:0 0 8px;font-size:14px;color:#6b7280;"><strong>Subject:</strong> ${title}</p>
+        <p style="margin:0 0 16px;font-size:14px;color:#6b7280;"><strong>Requested by:</strong> ${requesterName}</p>
+        <p style="margin:0 0 24px;font-size:14px;color:#374151;">Please review and respond to this ticket.</p>
+        <a href="${portalUrl}" style="display:inline-block;background:#1a1a2e;color:#fff;padding:10px 24px;border-radius:6px;text-decoration:none;">View Ticket</a>
+      `),
+    });
+    console.log(`Assignment email sent to ${to} for ${ticketNumber}:`, result);
+  } catch (error) {
+    console.error(`Failed to send assignment email to ${to} for ${ticketNumber}:`, error);
   }
 }
 
