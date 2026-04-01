@@ -86,10 +86,26 @@ export async function executeOnboarding(
 
   const firstName = (formData.first_name as string) || "";
   const lastName = (formData.last_name as string) || "";
-  const department = (formData.department as string) || "";
+  const deptCode = (formData.department as string) || "";
   const jobTitle = (formData.job_title as string) || "";
   const officeLocation = (formData.office_location as string) || "";
   const domain = (formData.domain as string) || "zimark.io";
+
+  // Map department codes to full names (matching Entra dynamic group rules)
+  const DEPT_MAP: Record<string, string> = {
+    rnd: "R&D",
+    marketing: "Marketing",
+    hr: "HR",
+    bizdev: "Biz Dev & Strategy",
+    finance: "Finance",
+    operations: "Operations",
+    legal: "Legal",
+    it: "IT",
+  };
+  const department = DEPT_MAP[deptCode] || deptCode;
+
+  // Key group IDs for onboarding
+  const ZIMARK_GENERAL_GROUP_ID = "c155f02e-770f-4c5a-8347-158c315b0cda";
 
   // ── Step 1: Create user in Entra ID ──────────────────────────────────────
   try {
@@ -103,6 +119,7 @@ export async function executeOnboarding(
       surname: lastName,
       mailNickname,
       userPrincipalName,
+      companyName: "Zimark",
       department: department || undefined,
       jobTitle: jobTitle || undefined,
       officeLocation: officeLocation || undefined,
@@ -310,6 +327,85 @@ export async function executeOnboarding(
       await logAuditStep("add_to_group", ticketId, actorId, {
         userId,
         department,
+        error,
+      });
+    }
+  }
+
+  // ── Step 4: Add to Zimark General group ────────────────────────────────────
+  if (userId) {
+    try {
+      await graphRequest(
+        "POST",
+        `/groups/${ZIMARK_GENERAL_GROUP_ID}/members/$ref`,
+        {
+          "@odata.id": `https://graph.microsoft.com/v1.0/directoryObjects/${userId}`,
+        },
+        tenantId
+      );
+      steps.push({
+        step: "add_to_zimark_general",
+        success: true,
+        details: { groupName: "Zimark General" },
+      });
+      await logAuditStep("add_to_zimark_general", ticketId, actorId, {
+        userId,
+        groupId: ZIMARK_GENERAL_GROUP_ID,
+        groupName: "Zimark General",
+      });
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      steps.push({
+        step: "add_to_zimark_general",
+        success: false,
+        details: {},
+        error,
+      });
+      await logAuditStep("add_to_zimark_general", ticketId, actorId, {
+        userId,
+        error,
+      });
+    }
+  }
+
+  // ── Step 5: Set manager if provided ───────────────────────────────────────
+  if (userId && formData.supervisor_email) {
+    try {
+      // Look up manager by email
+      const mgrEmail = formData.supervisor_email as string;
+      const mgrResult = (await graphRequest(
+        "GET",
+        `/users/${encodeURIComponent(mgrEmail)}?$select=id`,
+        null,
+        tenantId
+      )) as any;
+
+      if (mgrResult?.id) {
+        await graphRequest(
+          "PUT",
+          `/users/${userId}/manager/$ref`,
+          {
+            "@odata.id": `https://graph.microsoft.com/v1.0/users/${mgrResult.id}`,
+          },
+          tenantId
+        );
+        steps.push({
+          step: "set_manager",
+          success: true,
+          details: { managerEmail: mgrEmail },
+        });
+        await logAuditStep("set_manager", ticketId, actorId, {
+          userId,
+          managerEmail: mgrEmail,
+          managerId: mgrResult.id,
+        });
+      }
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      steps.push({
+        step: "set_manager",
+        success: false,
+        details: { managerEmail: formData.supervisor_email },
         error,
       });
     }
