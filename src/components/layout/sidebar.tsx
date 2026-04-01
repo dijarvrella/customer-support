@@ -14,6 +14,7 @@ import {
   GitBranch,
   List,
   Inbox,
+  Monitor,
   Users,
   Users2,
   Settings,
@@ -173,6 +174,7 @@ export function Sidebar({ user, pendingApprovalCount = 0 }: SidebarProps) {
   const agentNav: NavItemDef[] = [
     { href: "/tickets?view=all", label: "All Tickets", icon: List },
     { href: "/admin/queues", label: "Queues", icon: Inbox },
+    { href: "/devices", label: "Devices", icon: Monitor },
   ];
 
   const adminNav: NavItemDef[] = [
