@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/cron/action1-failures",
-      "schedule": "*/30 * * * *"
+      "schedule": "0 7 * * *"
     }
   ]
 }
