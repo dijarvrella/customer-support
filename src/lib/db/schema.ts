@@ -11,7 +11,7 @@ import {
   uniqueIndex,
   unique,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 
 // ─── TENANTS ───────────────────────────────────────────────────────────────
 export const tenants = pgTable("tenants", {
@@ -255,6 +255,26 @@ export const approvals = pgTable(
     index("idx_approvals_approver").on(table.approverId),
     index("idx_approvals_status").on(table.status),
   ]
+);
+
+// ─── WORKFLOW APPROVAL CONFIG (per category: Entra flags + designated emails) ─
+export const workflowApprovalConfigs = pgTable(
+  "workflow_approval_configs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    categorySlug: varchar("category_slug", { length: 128 }).notNull().unique(),
+    requestTypeLabel: varchar("request_type_label", { length: 255 }).notNull(),
+    uiCategory: varchar("ui_category", { length: 32 }).notNull().default("identity"),
+    includeEntraManager: boolean("include_entra_manager").notNull().default(true),
+    includeEntraCiso: boolean("include_entra_ciso").notNull().default(false),
+    designatedApprovers: jsonb("designated_approvers")
+      .$type<Array<{ email: string; name?: string; roleLabel?: string }>>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    notes: text("notes"),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [index("idx_workflow_approval_slug").on(table.categorySlug)]
 );
 
 // ─── SLACK MESSAGE LINKS ────────────────────────────────────────────────────

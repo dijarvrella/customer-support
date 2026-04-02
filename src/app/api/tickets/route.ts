@@ -1,11 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { tickets, auditLog, users, teams, teamMemberships, ticketComments, ticketHistory, approvals } from "@/lib/db/schema";
+import { tickets, auditLog, users, ticketComments, approvals } from "@/lib/db/schema";
 import { auth } from "@/lib/auth";
-import { eq, desc, asc, and, or, like, lt, sql, count, inArray } from "drizzle-orm";
+import { eq, desc, asc, and, or, like, lt, inArray } from "drizzle-orm";
 import { generateTicketNumber } from "@/lib/utils";
 import { DEFAULT_SLA, type TicketPriority } from "@/lib/constants";
-import { sendTicketCreatedEmail, sendTicketAssignedEmail, sendNewAssignmentEmail } from "@/lib/notifications/email";
+import {
+  sendTicketCreatedEmail,
+  sendTicketAssignedEmail,
+  sendNewAssignmentEmail,
+  sendApprovalRequestEmail,
+} from "@/lib/notifications/email";
+import { createApprovalsForCategoryTicket } from "@/lib/tickets/create-approvals-for-category";
+import {
+  autoAssignNewTicketToTeam,
+  defaultQueueIdForCategorySlug,
+} from "@/lib/tickets/devops-queue";
 
 // Security-related category slugs visible to CISO / security role
 const SECURITY_CATEGORIES = [
@@ -14,6 +24,7 @@ const SECURITY_CATEGORIES = [
   "vpn-request",
   "security-tool",
   "aws-iam",
+  "aws-account-access",
   "azure-change",
 ];
 
@@ -329,6 +340,9 @@ export async function POST(request: NextRequest) {
     const slaResolutionDue = new Date(now.getTime() + sla.resolutionMinutes * 60 * 1000);
 
     const ticketNumber = generateTicketNumber();
+    const queueId = await defaultQueueIdForCategorySlug(
+      categorySlug || null
+    );
 
     const [created] = await db
       .insert(tickets)
@@ -345,6 +359,7 @@ export async function POST(request: NextRequest) {
         tags: tags ? (Array.isArray(tags) ? tags.join(",") : tags) : null,
         slaResponseDue,
         slaResolutionDue,
+        queueId,
       })
       .returning();
 
@@ -364,102 +379,39 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Auto-assignment: round-robin across IT Operations team
+    const requesterEmailForApprovals = session.user.email || "";
+    const tenantIdForApprovals = (session.user as Record<string, unknown>)
+      .tenantId as string | null | undefined;
+
+    const approvalsCreatedCount = await createApprovalsForCategoryTicket({
+      ticketId: created.id,
+      categorySlug: categorySlug || null,
+      requesterEmail: requesterEmailForApprovals,
+      formData: (formData as Record<string, unknown> | null) || null,
+      tenantId: tenantIdForApprovals,
+    });
+
+    // Auto-assignment: DevOps team for cloud infra categories, else IT Operations
     try {
-      const itOpsTeam = await db
-        .select({ id: teams.id })
-        .from(teams)
-        .where(eq(teams.name, "IT Operations"))
-        .limit(1);
-
-      if (itOpsTeam.length > 0) {
-        const teamId = itOpsTeam[0].id;
-
-        // Get all active members of the IT Operations team
-        const members = await db
-          .select({
-            userId: teamMemberships.userId,
-            userName: users.name,
-          })
-          .from(teamMemberships)
-          .innerJoin(users, eq(teamMemberships.userId, users.id))
-          .where(
-            and(
-              eq(teamMemberships.teamId, teamId),
-              eq(users.isActive, true)
-            )
-          );
-
-        if (members.length > 0) {
-          // Round-robin: count open tickets per member, assign to one with fewest
-          const openStatuses = ["new", "triaged", "in_progress", "pending_info", "pending_vendor"];
-          const memberIds = members.map((m) => m.userId);
-
-          const ticketCounts = await db
-            .select({
-              assigneeId: tickets.assigneeId,
-              ticketCount: count(tickets.id),
-            })
-            .from(tickets)
-            .where(
-              and(
-                sql`${tickets.assigneeId} IN (${sql.join(memberIds.map(id => sql`${id}`), sql`, `)})`,
-                sql`${tickets.status} IN (${sql.join(openStatuses.map(s => sql`${s}`), sql`, `)})`
-              )
-            )
-            .groupBy(tickets.assigneeId);
-
-          const countMap = new Map<string, number>();
-          for (const tc of ticketCounts) {
-            if (tc.assigneeId) {
-              countMap.set(tc.assigneeId, Number(tc.ticketCount));
-            }
-          }
-
-          // Find member with fewest open tickets
-          let bestMember = members[0];
-          let bestCount = countMap.get(members[0].userId) ?? 0;
-          for (const m of members) {
-            const c = countMap.get(m.userId) ?? 0;
-            if (c < bestCount) {
-              bestCount = c;
-              bestMember = m;
-            }
-          }
-
-          // Update the ticket with assignee
-          await db
-            .update(tickets)
-            .set({ assigneeId: bestMember.userId, status: "triaged" })
-            .where(eq(tickets.id, created.id));
-
-          // Log the auto-assignment to ticket_history
-          await db.insert(ticketHistory).values({
-            ticketId: created.id,
-            actorId: null,
-            fieldName: "assigneeId",
-            oldValue: null,
-            newValue: bestMember.userId,
-            changeType: "auto_assignment",
-          });
-
-          await db.insert(ticketHistory).values({
-            ticketId: created.id,
-            actorId: null,
-            fieldName: "status",
-            oldValue: "new",
-            newValue: "triaged",
-            changeType: "auto_assignment",
-          });
-
-          // Update the created object to reflect changes
-          created.assigneeId = bestMember.userId;
-          created.status = "triaged";
-        }
+      const assigned = await autoAssignNewTicketToTeam({
+        ticketId: created.id,
+        categorySlug: categorySlug || null,
+        approvalsCreatedCount,
+      });
+      if (assigned) {
+        created.assigneeId = assigned.assigneeId;
+        created.status = assigned.status;
       }
     } catch (autoAssignError) {
-      // Auto-assignment is best-effort; log but don't fail the ticket creation
       console.error("Auto-assignment failed:", autoAssignError);
+    }
+
+    if (approvalsCreatedCount > 0 && created.status === "new") {
+      await db
+        .update(tickets)
+        .set({ status: "pending_approval", updatedAt: new Date() })
+        .where(eq(tickets.id, created.id));
+      created.status = "pending_approval";
     }
 
     // Auto-reply comment
@@ -482,6 +434,36 @@ export async function POST(request: NextRequest) {
     if (requesterEmail) {
       sendTicketCreatedEmail(requesterEmail, created.ticketNumber, created.title, portalUrl)
         .catch((err) => console.error("Ticket created email failed:", err));
+
+      if (approvalsCreatedCount > 0) {
+        const pendingForTicket = await db.query.approvals.findMany({
+          where: eq(approvals.ticketId, created.id),
+          with: {
+            approver: { columns: { name: true, email: true } },
+          },
+        });
+
+        const emailedApprovers = new Set<string>();
+        for (const row of pendingForTicket) {
+          if (row.status !== "pending") continue;
+          const to = row.approver.email?.trim().toLowerCase();
+          if (!to || emailedApprovers.has(to)) continue;
+          emailedApprovers.add(to);
+          sendApprovalRequestEmail(
+            to,
+            row.approver.name || to,
+            created.ticketNumber,
+            created.title,
+            session.user.name || session.user.email || "A colleague",
+            portalUrl
+          ).catch((err) =>
+            console.error(
+              `Ticket create: approval request email failed (${to}):`,
+              err
+            )
+          );
+        }
+      }
 
       if (created.assigneeId) {
         // Look up assignee for notification

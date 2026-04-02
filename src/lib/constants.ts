@@ -17,6 +17,50 @@ export type TicketPriority = (typeof TICKET_PRIORITIES)[number];
 export const TICKET_SOURCES = ["portal", "slack", "api", "email"] as const;
 export type TicketSource = (typeof TICKET_SOURCES)[number];
 
+/**
+ * Categories that auto-create approval rows on ticket create.
+ * Employee onboarding/offboarding are excluded: HR completes hiring/exit approval before filing these tickets, so no portal approval step.
+ */
+export const CATEGORY_SLUGS_REQUIRING_APPROVAL = [
+  "grant-access",
+  "revoke-access",
+  "aws-iam",
+  "aws-account-access",
+  "firewall-change",
+  "network-change",
+  "azure-change",
+  "hardware-purchase",
+  "new-employee-kit",
+  "security-tool",
+  "software-install",
+  "license-request",
+] as const;
+
+export function categorySlugRequiresApproval(
+  slug: string | null | undefined
+): boolean {
+  return (
+    !!slug &&
+    (CATEGORY_SLUGS_REQUIRING_APPROVAL as readonly string[]).includes(slug)
+  );
+}
+
+/** Routed to the DevOps queue / team (AWS, Azure cloud infra). */
+export const DEVOPS_QUEUE_CATEGORY_SLUGS = [
+  "aws-iam",
+  "aws-account-access",
+  "azure-change",
+] as const;
+
+export function categorySlugUsesDevopsQueue(
+  slug: string | null | undefined
+): boolean {
+  return (
+    !!slug &&
+    (DEVOPS_QUEUE_CATEGORY_SLUGS as readonly string[]).includes(slug)
+  );
+}
+
 export const USER_ROLES = [
   "end_user",
   "it_agent",

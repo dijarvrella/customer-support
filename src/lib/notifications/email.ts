@@ -10,35 +10,55 @@ function getResend(): Resend | null {
 const FROM_EMAIL =
   process.env.RESEND_FROM_EMAIL || "Zimark IT Support <notifications@zimark.io>";
 
-function emailLayout(content: string): string {
+/** Public site origin for absolute logo URLs in email (same asset as /login). */
+function getPublicOrigin(): string {
+  const raw =
+    process.env.NEXTAUTH_URL?.trim() ||
+    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "") ||
+    "";
+  return raw.replace(/\/$/, "");
+}
+
+function logoBlock(): string {
+  const origin = getPublicOrigin();
+  if (!origin) {
+    return `<div style="text-align:center;">
+      <span style="color:#0f172a;font-size:22px;font-weight:700;letter-spacing:-0.02em;">Zimark</span>
+    </div>`;
+  }
+  const src = `${origin}/zimark-logo.svg`;
+  return `<div style="text-align:center;">
+    <img src="${src}" alt="Zimark" width="200" style="display:inline-block;margin:0 auto;max-width:220px;height:auto;border:0;outline:none;" />
+  </div>`;
+}
+
+export function emailLayout(content: string): string {
   return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 </head>
-<body style="margin:0;padding:0;background-color:#f4f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f5f7;padding:32px 0;">
+<body style="margin:0;padding:0;background-color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f1f5f9;padding:32px 16px;">
     <tr>
       <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-          <!-- Header -->
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(15,23,42,0.08);">
           <tr>
-            <td style="background-color:#1a1a2e;padding:24px 32px;">
-              <span style="color:#ffffff;font-size:20px;font-weight:700;letter-spacing:-0.5px;">Zimark</span>
-              <span style="color:#8b8fa3;font-size:14px;margin-left:8px;">IT Support</span>
+            <td style="padding:28px 24px 20px;text-align:center;background-color:#ffffff;border-bottom:1px solid #e2e8f0;">
+              ${logoBlock()}
+              <p style="margin:14px 0 0;font-size:13px;color:#64748b;">IT Service Management</p>
             </td>
           </tr>
-          <!-- Body -->
           <tr>
-            <td style="padding:32px;">
+            <td style="padding:32px 28px;text-align:center;color:#334155;">
               ${content}
             </td>
           </tr>
-          <!-- Footer -->
           <tr>
-            <td style="padding:24px 32px;background-color:#f9fafb;border-top:1px solid #e5e7eb;">
-              <p style="margin:0;font-size:12px;color:#9ca3af;">This is an automated message from Zimark IT Support. Please do not reply directly to this email.</p>
+            <td style="padding:22px 28px;background-color:#f8fafc;border-top:1px solid #e2e8f0;text-align:center;">
+              <p style="margin:0;font-size:12px;color:#94a3b8;line-height:1.55;">This is an automated message from Zimark IT Support.<br />Please do not reply directly to this email.</p>
             </td>
           </tr>
         </table>
@@ -49,9 +69,30 @@ function emailLayout(content: string): string {
 </html>`;
 }
 
-function ticketLink(portalUrl: string, label?: string): string {
-  return `<a href="${portalUrl}" style="display:inline-block;padding:10px 20px;background-color:#1a1a2e;color:#ffffff;text-decoration:none;border-radius:6px;font-size:14px;font-weight:500;margin-top:16px;">${label || "View Ticket"}</a>`;
+export function ticketLink(portalUrl: string, label?: string): string {
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:28px 0 0;">
+    <tr>
+      <td align="center" style="padding:0;">
+        <a href="${portalUrl}" style="display:inline-block;padding:12px 28px;background-color:#0f172a;color:#ffffff !important;text-decoration:none;border-radius:8px;font-size:14px;font-weight:600;">${label || "View Ticket"}</a>
+      </td>
+    </tr>
+  </table>`;
 }
+
+export function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+const H2 = (text: string) =>
+  `<h2 style="margin:0 0 18px;font-size:20px;font-weight:700;color:#0f172a;text-align:center;line-height:1.3;">${text}</h2>`;
+const P = (html: string, extra = "") =>
+  `<p style="margin:0 0 12px;font-size:15px;color:#475569;text-align:center;line-height:1.55;${extra}">${html}</p>`;
+const META = (label: string, value: string) =>
+  `<p style="margin:0 0 6px;font-size:14px;color:#64748b;text-align:center;line-height:1.5;"><strong style="color:#334155;">${label}</strong> ${value}</p>`;
 
 export async function sendTicketCreatedEmail(
   to: string,
@@ -67,10 +108,10 @@ export async function sendTicketCreatedEmail(
       to,
       subject: `Your request ${ticketNumber} has been received`,
       html: emailLayout(`
-        <h2 style="margin:0 0 16px;font-size:20px;color:#111827;">Your request has been received</h2>
-        <p style="margin:0 0 8px;font-size:14px;color:#6b7280;"><strong>Ticket:</strong> ${ticketNumber}</p>
-        <p style="margin:0 0 16px;font-size:14px;color:#6b7280;"><strong>Subject:</strong> ${title}</p>
-        <p style="margin:0 0 24px;font-size:14px;color:#374151;">Thank you for submitting your request. Our IT team has received your ticket and will review it shortly. You will be notified of any updates.</p>
+        ${H2("Your request has been received")}
+        ${META("Ticket:", ticketNumber)}
+        ${META("Subject:", title)}
+        ${P("Thank you for submitting your request. Our IT team has received your ticket and will review it shortly. You will be notified of any updates.", "margin-bottom:8px;")}
         ${ticketLink(portalUrl)}
       `),
     });
@@ -93,11 +134,11 @@ export async function sendTicketAssignedEmail(
       to,
       subject: `Your request ${ticketNumber} has been assigned`,
       html: emailLayout(`
-        <h2 style="margin:0 0 16px;font-size:20px;color:#111827;">Your request has been assigned</h2>
-        <p style="margin:0 0 8px;font-size:14px;color:#6b7280;"><strong>Ticket:</strong> ${ticketNumber}</p>
-        <p style="margin:0 0 8px;font-size:14px;color:#6b7280;"><strong>Subject:</strong> ${title}</p>
-        <p style="margin:0 0 16px;font-size:14px;color:#6b7280;"><strong>Assigned to:</strong> ${assigneeName}</p>
-        <p style="margin:0 0 8px;font-size:14px;color:#374151;">Your request has been assigned to <strong>${assigneeName}</strong>, who will be looking into it.</p>
+        ${H2("Your request has been assigned")}
+        ${META("Ticket:", ticketNumber)}
+        ${META("Subject:", title)}
+        ${META("Assigned to:", assigneeName)}
+        ${P(`Your request has been assigned to <strong style="color:#0f172a;">${assigneeName}</strong>, who will be looking into it.`)}
       `),
     });
   } catch (error) {
@@ -121,14 +162,14 @@ export async function sendNewAssignmentEmail(
       to,
       subject: `New ticket assigned to you: ${ticketNumber}`,
       html: emailLayout(`
-        <h2 style="margin:0 0 16px;font-size:20px;color:#111827;">New Ticket Assigned to You</h2>
-        <p style="margin:0 0 8px;font-size:14px;color:#374151;">Hi ${assigneeName},</p>
-        <p style="margin:0 0 16px;font-size:14px;color:#374151;">A new ticket has been assigned to you:</p>
-        <p style="margin:0 0 8px;font-size:14px;color:#6b7280;"><strong>Ticket:</strong> ${ticketNumber}</p>
-        <p style="margin:0 0 8px;font-size:14px;color:#6b7280;"><strong>Subject:</strong> ${title}</p>
-        <p style="margin:0 0 16px;font-size:14px;color:#6b7280;"><strong>Requested by:</strong> ${requesterName}</p>
-        <p style="margin:0 0 24px;font-size:14px;color:#374151;">Please review and respond to this ticket.</p>
-        <a href="${portalUrl}" style="display:inline-block;background:#1a1a2e;color:#fff;padding:10px 24px;border-radius:6px;text-decoration:none;">View Ticket</a>
+        ${H2("New ticket assigned to you")}
+        ${P(`Hi <strong style="color:#0f172a;">${assigneeName}</strong>,`)}
+        ${P("A new ticket has been assigned to you:")}
+        ${META("Ticket:", ticketNumber)}
+        ${META("Subject:", title)}
+        ${META("Requested by:", requesterName)}
+        ${P("Please review and respond to this ticket.", "margin-bottom:8px;")}
+        ${ticketLink(portalUrl, "View Ticket")}
       `),
     });
     console.log(`Assignment email sent to ${to} for ${ticketNumber}:`, result);
@@ -153,13 +194,13 @@ export async function sendApprovalRequestEmail(
       to,
       subject: `Approval needed: ${title} (${ticketNumber})`,
       html: emailLayout(`
-        <h2 style="margin:0 0 16px;font-size:20px;color:#111827;">Approval needed</h2>
-        <p style="margin:0 0 8px;font-size:14px;color:#374151;">Hi ${approverName},</p>
-        <p style="margin:0 0 16px;font-size:14px;color:#374151;">A request requires your approval:</p>
-        <p style="margin:0 0 8px;font-size:14px;color:#6b7280;"><strong>Ticket:</strong> ${ticketNumber}</p>
-        <p style="margin:0 0 8px;font-size:14px;color:#6b7280;"><strong>Subject:</strong> ${title}</p>
-        <p style="margin:0 0 16px;font-size:14px;color:#6b7280;"><strong>Requested by:</strong> ${requesterName}</p>
-        <p style="margin:0 0 24px;font-size:14px;color:#374151;">Please review and approve or reject this request.</p>
+        ${H2("Approval needed")}
+        ${P(`Hi <strong style="color:#0f172a;">${approverName}</strong>,`)}
+        ${P("A request requires your approval:")}
+        ${META("Ticket:", ticketNumber)}
+        ${META("Subject:", title)}
+        ${META("Requested by:", requesterName)}
+        ${P("Please review and approve or reject this request.", "margin-bottom:8px;")}
         ${ticketLink(portalUrl, "Review Request")}
       `),
     });
@@ -186,11 +227,11 @@ export async function sendApprovalDecisionEmail(
       to,
       subject: `Your request ${ticketNumber} has been ${decisionLabel}`,
       html: emailLayout(`
-        <h2 style="margin:0 0 16px;font-size:20px;color:#111827;">Your request has been <span style="color:${decisionColor};">${decisionLabel}</span></h2>
-        <p style="margin:0 0 8px;font-size:14px;color:#6b7280;"><strong>Ticket:</strong> ${ticketNumber}</p>
-        <p style="margin:0 0 8px;font-size:14px;color:#6b7280;"><strong>Subject:</strong> ${title}</p>
-        <p style="margin:0 0 16px;font-size:14px;color:#6b7280;"><strong>Decided by:</strong> ${approverName}</p>
-        <p style="margin:0 0 8px;font-size:14px;color:#374151;">Your request has been <strong style="color:${decisionColor};">${decisionLabel}</strong> by ${approverName}.</p>
+        <h2 style="margin:0 0 18px;font-size:20px;font-weight:700;color:#0f172a;text-align:center;line-height:1.3;">Your request has been <span style="color:${decisionColor};">${decisionLabel}</span></h2>
+        ${META("Ticket:", ticketNumber)}
+        ${META("Subject:", title)}
+        ${META("Decided by:", approverName)}
+        ${P(`Your request has been <strong style="color:${decisionColor};">${decisionLabel}</strong> by ${approverName}.`)}
       `),
     });
   } catch (error) {
@@ -213,13 +254,19 @@ export async function sendTicketCommentEmail(
       to,
       subject: `New update on ${ticketNumber}: ${title}`,
       html: emailLayout(`
-        <h2 style="margin:0 0 16px;font-size:20px;color:#111827;">New update on your request</h2>
-        <p style="margin:0 0 8px;font-size:14px;color:#6b7280;"><strong>Ticket:</strong> ${ticketNumber}</p>
-        <p style="margin:0 0 16px;font-size:14px;color:#6b7280;"><strong>Subject:</strong> ${title}</p>
-        <p style="margin:0 0 8px;font-size:14px;color:#374151;"><strong>${commenterName}</strong> posted an update:</p>
-        <div style="margin:16px 0;padding:16px;background-color:#f9fafb;border-left:3px solid #1a1a2e;border-radius:4px;">
-          <p style="margin:0;font-size:14px;color:#374151;white-space:pre-wrap;">${commentBody}</p>
-        </div>
+        ${H2("New update on your request")}
+        ${META("Ticket:", ticketNumber)}
+        ${META("Subject:", title)}
+        ${P(`<strong style="color:#0f172a;">${commenterName}</strong> posted an update:`)}
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:16px 0 0;">
+          <tr>
+            <td align="center">
+              <div style="max-width:480px;margin:0 auto;padding:16px 18px;background-color:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;text-align:left;">
+                <p style="margin:0;font-size:14px;color:#334155;white-space:pre-wrap;line-height:1.5;">${escapeHtml(commentBody)}</p>
+              </div>
+            </td>
+          </tr>
+        </table>
       `),
     });
   } catch (error) {
@@ -240,10 +287,10 @@ export async function sendTicketResolvedEmail(
       to,
       subject: `Your request ${ticketNumber} has been resolved`,
       html: emailLayout(`
-        <h2 style="margin:0 0 16px;font-size:20px;color:#111827;">Your request has been resolved</h2>
-        <p style="margin:0 0 8px;font-size:14px;color:#6b7280;"><strong>Ticket:</strong> ${ticketNumber}</p>
-        <p style="margin:0 0 16px;font-size:14px;color:#6b7280;"><strong>Subject:</strong> ${title}</p>
-        <p style="margin:0 0 8px;font-size:14px;color:#374151;">Your request has been resolved by our IT team. If you have any further questions or if the issue persists, please reply to your original ticket or submit a new request.</p>
+        ${H2("Your request has been resolved")}
+        ${META("Ticket:", ticketNumber)}
+        ${META("Subject:", title)}
+        ${P("Your request has been resolved by our IT team. If you have any further questions or if the issue persists, please reply to your original ticket or submit a new request.")}
       `),
     });
   } catch (error) {

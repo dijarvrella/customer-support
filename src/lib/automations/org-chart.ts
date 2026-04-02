@@ -143,8 +143,6 @@ export async function getRequiredApprovers(
 
   // Manager approval for most request types
   const managerRequired = [
-    "employee-onboarding",
-    "employee-offboarding",
     "grant-access",
     "aws-iam",
     "aws-account-access",

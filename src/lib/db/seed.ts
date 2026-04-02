@@ -28,12 +28,18 @@ const USER_IDS = {
 const TEAM_IDS = {
   itOps: "10000000-0000-0000-0000-000000000001",
   security: "10000000-0000-0000-0000-000000000002",
+  devOps: "10000000-0000-0000-0000-000000000003",
 };
 
 const QUEUE_IDS = {
   generalIT: "20000000-0000-0000-0000-000000000001",
   security: "20000000-0000-0000-0000-000000000002",
+  devOps: "20000000-0000-0000-0000-000000000003",
 };
+
+/** Zimark DevOps members (queue round-robin) */
+const ZIMAR_DIJAR_ID = "b0000000-0000-0000-0000-000000000001";
+const ZIMAR_NICO_ID = "b0000000-0000-0000-0000-000000000004";
 
 const CATEGORY_IDS = {
   generalIT: "30000000-0000-0000-0000-000000000001",
@@ -187,6 +193,16 @@ async function seedUsers() {
         tenantId: TENANT_IDS.zimark,
         isActive: true,
       },
+      {
+        id: ZIMAR_NICO_ID,
+        email: "nico.aroyo@zimark.io",
+        name: "Nico Aroyo",
+        role: "it_agent",
+        department: "Engineering",
+        jobTitle: "DevOps Engineer",
+        tenantId: TENANT_IDS.zimark,
+        isActive: true,
+      },
       // Global admin
       {
         id: "c0000000-0000-0000-0000-000000000001",
@@ -221,6 +237,15 @@ async function seedTeams() {
         leadId: USER_IDS.security,
         isActive: true,
       },
+      {
+        id: TEAM_IDS.devOps,
+        name: "DevOps",
+        description:
+          "Cloud infrastructure (AWS, Azure) — owns the DevOps queue; Nico & Dijar",
+        leadId: ZIMAR_DIJAR_ID,
+        tenantId: TENANT_IDS.zimark,
+        isActive: true,
+      },
     ])
     .onConflictDoNothing();
   console.log("  Teams seeded.");
@@ -249,9 +274,37 @@ async function seedQueues() {
         assignmentStrategy: "manual",
         isActive: true,
       },
+      {
+        id: QUEUE_IDS.devOps,
+        name: "DevOps",
+        teamId: TEAM_IDS.devOps,
+        description:
+          "AWS IAM, Azure/Entra changes, and cloud infra — auto-routed from those request types",
+        tenantId: TENANT_IDS.zimark,
+        autoAssign: false,
+        assignmentStrategy: "manual",
+        isActive: true,
+      },
     ])
     .onConflictDoNothing();
   console.log("  Queues seeded.");
+}
+
+async function seedTeamMemberships() {
+  console.log("Seeding team memberships...");
+  await db.insert(schema.teamMemberships).values([
+    {
+      teamId: TEAM_IDS.devOps,
+      userId: ZIMAR_DIJAR_ID,
+      role: "member",
+    },
+    {
+      teamId: TEAM_IDS.devOps,
+      userId: ZIMAR_NICO_ID,
+      role: "member",
+    },
+  ]);
+  console.log("  Team memberships seeded.");
 }
 
 async function seedCategories() {
@@ -732,6 +785,7 @@ async function main() {
     await seedUsers();
     await seedTeams();
     await seedQueues();
+    await seedTeamMemberships();
     await seedCategories();
     await seedTickets();
     await seedComments();

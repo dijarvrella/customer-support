@@ -12,7 +12,8 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "db:seed": "npx tsx src/lib/db/seed.ts",
-    "db:seed:mocks": "npx tsx src/lib/db/seed-zimark-mocks.ts"
+    "db:seed:mocks": "npx tsx src/lib/db/seed-zimark-mocks.ts",
+    "db:update-nico": "npx tsx scripts/update-nico-user.ts"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.7.0",

@@ -4,9 +4,16 @@ import { tickets, approvals, auditLog } from "@/lib/db/schema";
 import { auth } from "@/lib/auth";
 import { eq } from "drizzle-orm";
 import { generateTicketNumber } from "@/lib/utils";
-import { DEFAULT_SLA, type TicketPriority } from "@/lib/constants";
-import { getRequiredApprovers } from "@/lib/automations/org-chart";
-import { findOrCreateUserByEmail } from "@/lib/db/find-or-create-user";
+import {
+  DEFAULT_SLA,
+  type TicketPriority,
+  categorySlugRequiresApproval,
+} from "@/lib/constants";
+import { createApprovalsForCategoryTicket } from "@/lib/tickets/create-approvals-for-category";
+import {
+  autoAssignNewTicketToTeam,
+  defaultQueueIdForCategorySlug,
+} from "@/lib/tickets/devops-queue";
 import {
   sendTicketCreatedEmail,
   sendApprovalRequestEmail,
@@ -71,23 +78,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const slaResponseDue = new Date(now.getTime() + sla.responseMinutes * 60 * 1000);
     const slaResolutionDue = new Date(now.getTime() + sla.resolutionMinutes * 60 * 1000);
 
-    // Determine if approval is needed
-    const approvalRequired = [
-      "employee-onboarding",
-      "employee-offboarding",
-      "grant-access",
-      "revoke-access",
-      "aws-iam",
-      "aws-account-access",
-      "firewall-change",
-      "network-change",
-      "azure-change",
-      "hardware-purchase",
-      "new-employee-kit",
-      "security-tool",
-    ].includes(slug);
+    const approvalRequired = categorySlugRequiresApproval(slug);
 
     const ticketNumber = generateTicketNumber();
+    const queueId = await defaultQueueIdForCategorySlug(slug);
 
     const [ticket] = await db
       .insert(tickets)
@@ -103,75 +97,49 @@ export async function POST(request: NextRequest, context: RouteContext) {
         source: "portal",
         formData: data,
         formType: slug,
-        status: approvalRequired ? "pending_approval" : "new",
+        status: "new",
         slaResponseDue,
         slaResolutionDue,
+        queueId,
       })
       .returning();
 
-    // Auto-create approval records from Microsoft org chart
+    const requesterEmail = session.user.email || "";
+    const tenantId = (session.user as Record<string, unknown>).tenantId as
+      | string
+      | null
+      | undefined;
+
+    let approvalsCount = 0;
     if (approvalRequired) {
-      const requesterEmail = session.user.email || "";
-
-      try {
-        // Fetch required approvers from org chart
-        const orgApprovers = await getRequiredApprovers(requesterEmail, slug);
-
-        for (const approverInfo of orgApprovers) {
-          const approverUser = await findOrCreateUserByEmail(
-            approverInfo.email,
-            approverInfo.name
-          );
-          await db.insert(approvals).values({
-            ticketId: ticket.id,
-            approverId: approverUser.id,
-            approverRole: approverInfo.role,
-            status: "pending",
-          });
-        }
-
-        // If no org approvers found, fall back to form-provided supervisor
-        if (orgApprovers.length === 0) {
-          const supervisorEmail =
-            (data.supervisor_email as string) ||
-            (data.supervisorEmail as string) ||
-            (data.manager_email as string) ||
-            (data.managerEmail as string);
-
-          if (supervisorEmail) {
-            const supervisorName =
-              (data.supervisor_name as string) ||
-              (data.supervisorName as string) ||
-              supervisorEmail.split("@")[0];
-
-            const approverUser = await findOrCreateUserByEmail(
-              supervisorEmail,
-              supervisorName
-            );
-            await db.insert(approvals).values({
-              ticketId: ticket.id,
-              approverId: approverUser.id,
-              approverRole: "manager",
-              status: "pending",
-            });
-          }
-        }
-      } catch (err) {
-        console.error("Error creating approvals from org chart:", err);
-        // Fall back to form supervisor
-        const supervisorEmail =
-          (data.supervisor_email as string) ||
-          (data.manager_email as string);
-        if (supervisorEmail) {
-          const approverUser = await findOrCreateUserByEmail(supervisorEmail);
-          await db.insert(approvals).values({
-            ticketId: ticket.id,
-            approverId: approverUser.id,
-            approverRole: "manager",
-            status: "pending",
-          });
-        }
+      approvalsCount = await createApprovalsForCategoryTicket({
+        ticketId: ticket.id,
+        categorySlug: slug,
+        requesterEmail,
+        formData: data as Record<string, unknown>,
+        tenantId,
+      });
+      if (approvalsCount > 0) {
+        await db
+          .update(tickets)
+          .set({ status: "pending_approval", updatedAt: new Date() })
+          .where(eq(tickets.id, ticket.id));
+        ticket.status = "pending_approval";
       }
+    }
+
+    try {
+      const assigned = await autoAssignNewTicketToTeam({
+        ticketId: ticket.id,
+        categorySlug: slug,
+        approvalsCreatedCount: approvalsCount,
+      });
+      if (assigned) {
+        ticket.assigneeId = assigned.assigneeId;
+        ticket.status = assigned.status;
+      }
+    } catch (autoAssignError) {
+      console.error("Form submit: auto-assignment failed:", autoAssignError);
     }
 
     // Audit log
@@ -191,7 +159,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
     });
 
     const portalUrl = `${request.nextUrl.origin}/tickets/${ticket.id}`;
-    const requesterEmail = session.user.email;
 
     if (requesterEmail) {
       sendTicketCreatedEmail(
@@ -204,7 +171,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       );
     }
 
-    if (approvalRequired) {
+    if (approvalsCount > 0) {
       const pendingForTicket = await db.query.approvals.findMany({
         where: eq(approvals.ticketId, ticket.id),
         with: {

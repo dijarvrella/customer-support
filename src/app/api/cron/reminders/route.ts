@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { tickets, users, ticketComments, notifications } from "@/lib/db/schema";
 import { eq, and, sql, lt, desc, notInArray } from "drizzle-orm";
 import { Resend } from "resend";
+import { emailLayout, ticketLink, escapeHtml } from "@/lib/notifications/email";
 
 // Verify cron secret to prevent unauthorized access
 const CRON_SECRET = process.env.CRON_SECRET;
@@ -15,9 +16,13 @@ function getResend(): Resend | null {
 }
 
 const FROM_EMAIL =
-  process.env.RESEND_FROM_EMAIL || "IT Support <onboarding@resend.dev>";
-const PORTAL_URL =
-  process.env.NEXTAUTH_URL || "https://it-support.zimark.link";
+  process.env.RESEND_FROM_EMAIL || "Zimark IT Support <notifications@zimark.io>";
+const PORTAL_URL = (
+  process.env.NEXTAUTH_URL?.trim() ||
+  process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "") ||
+  "https://it-support.zimark.link"
+).replace(/\/$/, "");
 
 async function createNotification(
   userId: string,
@@ -38,14 +43,6 @@ async function createNotification(
   } catch {
     // silent
   }
-}
-
-function emailWrap(content: string): string {
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"/></head><body style="font-family:system-ui,sans-serif;max-width:600px;margin:0 auto;padding:20px;color:#1a1a2e;">
-<div style="background:#1a1a2e;padding:16px 24px;border-radius:8px 8px 0 0;"><span style="color:#fff;font-weight:700;font-size:18px;">Zimark ITSM</span></div>
-<div style="border:1px solid #e2e8f0;border-top:none;padding:24px;border-radius:0 0 8px 8px;">${content}</div>
-<p style="color:#94a3b8;font-size:12px;margin-top:16px;">This is an automated reminder from Zimark IT Support Portal.</p>
-</body></html>`;
 }
 
 interface ReminderResult {
@@ -132,18 +129,20 @@ export async function GET(request: NextRequest) {
           from: FROM_EMAIL,
           to: ticket.assigneeEmail,
           subject: `[${urgency}] Ticket ${ticket.ticketNumber} needs attention (${hoursStale}h without update)`,
-          html: emailWrap(`
-            <h2 style="margin:0 0 8px;">Ticket Requires Your Attention</h2>
-            <p style="color:#64748b;margin:0 0 16px;">This ticket has had no updates for <strong>${hoursStale} hours</strong>.</p>
-            <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-              <tr><td style="padding:8px;border-bottom:1px solid #e2e8f0;color:#64748b;width:120px;">Ticket</td><td style="padding:8px;border-bottom:1px solid #e2e8f0;font-weight:600;">${ticket.ticketNumber}</td></tr>
-              <tr><td style="padding:8px;border-bottom:1px solid #e2e8f0;color:#64748b;">Title</td><td style="padding:8px;border-bottom:1px solid #e2e8f0;">${ticket.title}</td></tr>
-              <tr><td style="padding:8px;border-bottom:1px solid #e2e8f0;color:#64748b;">Priority</td><td style="padding:8px;border-bottom:1px solid #e2e8f0;text-transform:capitalize;">${ticket.priority}</td></tr>
-              <tr><td style="padding:8px;border-bottom:1px solid #e2e8f0;color:#64748b;">Reported by</td><td style="padding:8px;border-bottom:1px solid #e2e8f0;">${ticket.requesterName || "Unknown"}</td></tr>
+          html: emailLayout(`
+            <h2 style="margin:0 0 12px;font-size:20px;font-weight:700;color:#0f172a;text-align:center;line-height:1.3;">Ticket requires your attention</h2>
+            <p style="margin:0 0 16px;font-size:15px;color:#475569;text-align:center;line-height:1.55;">This ticket has had no updates for <strong>${hoursStale} hours</strong>.</p>
+            <div style="display:inline-block;text-align:left;margin:0 auto 8px;max-width:100%;">
+            <table role="presentation" style="width:100%;max-width:420px;border-collapse:collapse;margin:8px 0 16px;">
+              <tr><td style="padding:8px;border-bottom:1px solid #e2e8f0;color:#64748b;width:120px;">Ticket</td><td style="padding:8px;border-bottom:1px solid #e2e8f0;font-weight:600;">${escapeHtml(ticket.ticketNumber)}</td></tr>
+              <tr><td style="padding:8px;border-bottom:1px solid #e2e8f0;color:#64748b;">Title</td><td style="padding:8px;border-bottom:1px solid #e2e8f0;">${escapeHtml(ticket.title)}</td></tr>
+              <tr><td style="padding:8px;border-bottom:1px solid #e2e8f0;color:#64748b;">Priority</td><td style="padding:8px;border-bottom:1px solid #e2e8f0;text-transform:capitalize;">${escapeHtml(ticket.priority)}</td></tr>
+              <tr><td style="padding:8px;border-bottom:1px solid #e2e8f0;color:#64748b;">Reported by</td><td style="padding:8px;border-bottom:1px solid #e2e8f0;">${escapeHtml(ticket.requesterName || "Unknown")}</td></tr>
               <tr><td style="padding:8px;color:#64748b;">Last updated</td><td style="padding:8px;">${hoursStale} hours ago</td></tr>
             </table>
-            <p>Please review and update the ticket with your progress or resolution.</p>
-            <a href="${PORTAL_URL}/tickets/${ticket.ticketId}" style="display:inline-block;background:#1a1a2e;color:#fff;padding:10px 24px;border-radius:6px;text-decoration:none;margin-top:8px;">View Ticket</a>
+            </div>
+            <p style="margin:0 0 8px;font-size:15px;color:#475569;text-align:center;line-height:1.55;">Please review and update the ticket with your progress or resolution.</p>
+            ${ticketLink(`${PORTAL_URL}/tickets/${ticket.ticketId}`, "View Ticket")}
           `),
         });
         result.assigneeReminders++;
@@ -181,13 +180,13 @@ export async function GET(request: NextRequest) {
           from: FROM_EMAIL,
           to: ticket.requesterEmail,
           subject: `Is your issue resolved? - ${ticket.ticketNumber}`,
-          html: emailWrap(`
-            <h2 style="margin:0 0 8px;">Follow-up: Is Your Issue Resolved?</h2>
-            <p>Hi ${ticket.requesterName || "there"},</p>
-            <p>Your ticket <strong>${ticket.ticketNumber} - ${ticket.title}</strong> was marked as resolved. We'd like to confirm everything is working as expected.</p>
-            <p>If the issue is fixed, no action is needed - the ticket will close automatically.</p>
-            <p>If you're still experiencing problems, please reply or reopen the ticket:</p>
-            <a href="${PORTAL_URL}/tickets/${ticket.ticketId}" style="display:inline-block;background:#1a1a2e;color:#fff;padding:10px 24px;border-radius:6px;text-decoration:none;margin-top:8px;">View Ticket</a>
+          html: emailLayout(`
+            <h2 style="margin:0 0 12px;font-size:20px;font-weight:700;color:#0f172a;text-align:center;line-height:1.3;">Follow-up: is your issue resolved?</h2>
+            <p style="margin:0 0 12px;font-size:15px;color:#475569;text-align:center;line-height:1.55;">Hi ${escapeHtml(ticket.requesterName || "there")},</p>
+            <p style="margin:0 0 12px;font-size:15px;color:#475569;text-align:center;line-height:1.55;">Your ticket <strong style="color:#0f172a;">${escapeHtml(ticket.ticketNumber)} — ${escapeHtml(ticket.title)}</strong> was marked as resolved. We'd like to confirm everything is working as expected.</p>
+            <p style="margin:0 0 12px;font-size:15px;color:#475569;text-align:center;line-height:1.55;">If the issue is fixed, no action is needed — the ticket will close automatically.</p>
+            <p style="margin:0 0 8px;font-size:15px;color:#475569;text-align:center;line-height:1.55;">If you're still experiencing problems, please reply or reopen the ticket.</p>
+            ${ticketLink(`${PORTAL_URL}/tickets/${ticket.ticketId}`, "View Ticket")}
           `),
         });
         result.requesterFollowUps++;
@@ -232,18 +231,28 @@ export async function GET(request: NextRequest) {
           from: FROM_EMAIL,
           to: ticket.assigneeEmail,
           subject: `SLA WARNING: ${ticket.ticketNumber} due in ${minutesLeft} minutes`,
-          html: emailWrap(`
-            <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:12px 16px;margin-bottom:16px;">
-              <strong style="color:#dc2626;">SLA Breach Warning</strong>
-              <p style="color:#991b1b;margin:4px 0 0;">This ticket's resolution deadline is in <strong>${minutesLeft} minutes</strong>.</p>
+          html: emailLayout(`
+            <div style="display:inline-block;text-align:center;max-width:100%;margin:0 auto 16px;">
+              <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:14px 18px;">
+                <strong style="color:#dc2626;font-size:15px;">SLA breach warning</strong>
+                <p style="color:#991b1b;margin:6px 0 0;font-size:15px;text-align:center;line-height:1.5;">This ticket's resolution deadline is in <strong>${minutesLeft} minutes</strong>.</p>
+              </div>
             </div>
-            <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-              <tr><td style="padding:8px;border-bottom:1px solid #e2e8f0;color:#64748b;width:120px;">Ticket</td><td style="padding:8px;border-bottom:1px solid #e2e8f0;font-weight:600;">${ticket.ticketNumber}</td></tr>
-              <tr><td style="padding:8px;border-bottom:1px solid #e2e8f0;color:#64748b;">Title</td><td style="padding:8px;border-bottom:1px solid #e2e8f0;">${ticket.title}</td></tr>
-              <tr><td style="padding:8px;color:#64748b;">Priority</td><td style="padding:8px;text-transform:capitalize;font-weight:600;color:#dc2626;">${ticket.priority}</td></tr>
+            <div style="display:inline-block;text-align:left;margin:0 auto 8px;max-width:100%;">
+            <table role="presentation" style="width:100%;max-width:420px;border-collapse:collapse;margin:8px 0 16px;">
+              <tr><td style="padding:8px;border-bottom:1px solid #e2e8f0;color:#64748b;width:120px;">Ticket</td><td style="padding:8px;border-bottom:1px solid #e2e8f0;font-weight:600;">${escapeHtml(ticket.ticketNumber)}</td></tr>
+              <tr><td style="padding:8px;border-bottom:1px solid #e2e8f0;color:#64748b;">Title</td><td style="padding:8px;border-bottom:1px solid #e2e8f0;">${escapeHtml(ticket.title)}</td></tr>
+              <tr><td style="padding:8px;color:#64748b;">Priority</td><td style="padding:8px;text-transform:capitalize;font-weight:600;color:#dc2626;">${escapeHtml(ticket.priority)}</td></tr>
             </table>
-            <p>Please resolve or update this ticket immediately to avoid an SLA breach.</p>
-            <a href="${PORTAL_URL}/tickets/${ticket.ticketId}" style="display:inline-block;background:#dc2626;color:#fff;padding:10px 24px;border-radius:6px;text-decoration:none;margin-top:8px;">View Ticket Now</a>
+            </div>
+            <p style="margin:0 0 8px;font-size:15px;color:#475569;text-align:center;line-height:1.55;">Please resolve or update this ticket immediately to avoid an SLA breach.</p>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:20px 0 0;">
+              <tr>
+                <td align="center" style="padding:0;">
+                  <a href="${PORTAL_URL}/tickets/${ticket.ticketId}" style="display:inline-block;padding:12px 28px;background-color:#dc2626;color:#ffffff !important;text-decoration:none;border-radius:8px;font-size:14px;font-weight:600;">View ticket now</a>
+                </td>
+              </tr>
+            </table>
           `),
         });
         result.slaWarnings++;
