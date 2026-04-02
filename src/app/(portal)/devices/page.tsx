@@ -685,7 +685,7 @@ export default function DevicesPage() {
           }
         }}
       >
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <OsIcon os={selectedDevice?.operatingSystem || ""} />
@@ -697,14 +697,14 @@ export default function DevicesPage() {
           </DialogHeader>
 
           {selectedDevice && (
-            <Tabs defaultValue="intune">
-              <TabsList className="mb-4">
+            <Tabs defaultValue="intune" className="flex flex-col min-h-0 flex-1">
+              <TabsList className="mb-4 shrink-0">
                 <TabsTrigger value="intune">Intune</TabsTrigger>
                 <TabsTrigger value="action1">Action1</TabsTrigger>
               </TabsList>
 
               {/* ── Intune tab ── */}
-              <TabsContent value="intune">
+              <TabsContent value="intune" className="overflow-y-auto flex-1 pr-1">
                 <div className="space-y-4">
                   <div className="space-y-3">
                     <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
@@ -785,7 +785,7 @@ export default function DevicesPage() {
               </TabsContent>
 
               {/* ── Action1 tab ── */}
-              <TabsContent value="action1">
+              <TabsContent value="action1" className="overflow-y-auto flex-1 pr-1">
                 {action1Loading ? (
                   <div className="flex items-center justify-center py-12">
                     <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -813,45 +813,28 @@ export default function DevicesPage() {
                 ) : (
                   <div className="space-y-5">
                     {/* Endpoint general info */}
-                    <div className="space-y-3">
+                    <div className="space-y-2">
                       <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
                         Endpoint
                       </h3>
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-                        <div>
-                          <p className="text-muted-foreground">Status</p>
-                          <div className="mt-0.5">
-                            <Action1StatusBadge status={action1Data.endpoint.status} />
+                      <div className="text-sm space-y-1.5">
+                        {[
+                          { label: "Status", value: <Action1StatusBadge status={action1Data.endpoint.status} /> },
+                          { label: "Reboot Required", value: action1Data.endpoint.reboot_required
+                              ? <span className="text-orange-600 font-medium">Yes</span>
+                              : <span className="text-green-600">No</span> },
+                          { label: "User", value: action1Data.endpoint.user_name || "-" },
+                          { label: "OS", value: action1Data.endpoint.os_name || "-" },
+                          { label: "Last Seen", value: formatDate(action1Data.endpoint.last_seen) || "-" },
+                          ...(action1Data.endpoint.endpoint_groups?.length
+                            ? [{ label: "Groups", value: action1Data.endpoint.endpoint_groups.join(", ") }]
+                            : []),
+                        ].map(({ label, value }) => (
+                          <div key={label} className="flex items-start justify-between gap-4 py-1 border-b border-border/50 last:border-0">
+                            <span className="text-muted-foreground shrink-0">{label}</span>
+                            <span className="font-medium text-right">{value}</span>
                           </div>
-                        </div>
-                        <div>
-                          <p className="text-muted-foreground">Reboot Required</p>
-                          <p className="font-medium">
-                            {action1Data.endpoint.reboot_required ? (
-                              <span className="text-orange-600 font-medium">Yes</span>
-                            ) : (
-                              <span className="text-green-600">No</span>
-                            )}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-muted-foreground">User</p>
-                          <p className="font-medium">{action1Data.endpoint.user_name || "-"}</p>
-                        </div>
-                        <div>
-                          <p className="text-muted-foreground">OS</p>
-                          <p className="font-medium">{action1Data.endpoint.os_name || "-"}</p>
-                        </div>
-                        <div>
-                          <p className="text-muted-foreground">Last Seen</p>
-                          <p className="font-medium">{formatDate(action1Data.endpoint.last_seen) || "-"}</p>
-                        </div>
-                        {action1Data.endpoint.endpoint_groups?.length ? (
-                          <div>
-                            <p className="text-muted-foreground">Groups</p>
-                            <p className="font-medium">{action1Data.endpoint.endpoint_groups.join(", ")}</p>
-                          </div>
-                        ) : null}
+                        ))}
                       </div>
                     </div>
 
@@ -868,7 +851,7 @@ export default function DevicesPage() {
                       {action1Data.missingUpdates.length === 0 ? (
                         <p className="text-sm text-green-600 dark:text-green-400">Up to date</p>
                       ) : (
-                        <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
+                        <div className="space-y-1">
                           {action1Data.missingUpdates.map((u, i) => (
                             <div key={u.id ?? i} className="flex items-center gap-2 text-xs rounded-md px-3 py-1.5 border border-orange-200 bg-orange-50 dark:bg-orange-950/20 dark:border-orange-800">
                               <AlertTriangle className="h-3.5 w-3.5 text-orange-500 shrink-0" />
@@ -892,7 +875,7 @@ export default function DevicesPage() {
                       {action1Data.vulnerabilities.length === 0 ? (
                         <p className="text-sm text-green-600 dark:text-green-400">No vulnerabilities found</p>
                       ) : (
-                        <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                        <div className="space-y-1.5">
                           {action1Data.vulnerabilities.map((v, i) => {
                             const score = parseFloat(v.cvss_score ?? "0");
                             const severity = score >= 9 ? "Critical" : score >= 7 ? "High" : score >= 4 ? "Medium" : "Low";
@@ -930,7 +913,7 @@ export default function DevicesPage() {
                       {action1Data.installedSoftware.length === 0 ? (
                         <p className="text-sm text-muted-foreground">No data available</p>
                       ) : (
-                        <div className="max-h-40 overflow-y-auto pr-1 space-y-0.5">
+                        <div className="space-y-0.5">
                           {action1Data.installedSoftware.map((s, i) => (
                             <div key={i} className="text-xs px-3 py-1 rounded bg-muted/40 truncate">{s.name}</div>
                           ))}
@@ -953,7 +936,7 @@ export default function DevicesPage() {
                       {action1Data.automationHistory.length === 0 ? (
                         <p className="text-sm text-muted-foreground">No automation history available</p>
                       ) : (
-                        <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                        <div className="space-y-1.5">
                           {action1Data.automationHistory.map((run, i) => {
                             const status = (run.status ?? run.result ?? "").toLowerCase();
                             const isError = status === "error" || status === "failed";
