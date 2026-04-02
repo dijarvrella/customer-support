@@ -77,49 +77,50 @@ export function TicketWorkflowTimeline({
   createdAt,
   approvals,
 }: TicketWorkflowTimelineProps) {
-  const terminal = ["resolved", "closed", "cancelled"].includes(status);
-  const needsApproval =
+  const needsApprovalFlow =
     approvals.length > 0 || status === "pending_approval";
   const pendingList = approvals.filter((a) => a.status === "pending");
   const anyRejected = approvals.some(
     (a) => a.decision === "rejected" || a.status === "rejected"
   );
   const approvalComplete =
-    needsApproval &&
+    needsApprovalFlow &&
     pendingList.length === 0 &&
     approvals.length > 0 &&
     !anyRejected;
 
-  let stepApproval: StepState;
+  let stepApproval: StepState = "skipped";
   let approvalDetail: string | null = null;
 
-  if (!needsApproval) {
-    stepApproval = "skipped";
-  } else if (anyRejected || status === "cancelled") {
-    stepApproval = "blocked";
-    approvalDetail =
-      anyRejected
-        ? "This request was not approved. The ticket may be closed or cancelled."
+  if (needsApprovalFlow) {
+    if (anyRejected || status === "cancelled") {
+      stepApproval = "blocked";
+      approvalDetail = anyRejected
+        ? "This request was not approved."
         : null;
-  } else if (pendingList.length > 0) {
-    stepApproval = "current";
-    const names = pendingList
-      .map(
-        (a) =>
-          `${a.approver.name}${a.approverRole ? ` (${a.approverRole})` : ""}`
-      )
-      .join(", ");
-    approvalDetail = `Waiting for: ${names}. They were notified by email (if mail is configured).`;
-  } else if (status === "pending_approval" && approvals.length === 0) {
-    stepApproval = "current";
-    approvalDetail =
-      "IT is routing this request to the right approver. You will see their name here once assigned.";
-  } else if (approvalComplete || !["pending_approval"].includes(status)) {
-    stepApproval = "done";
-    approvalDetail = "All required approvals are in place.";
-  } else {
-    stepApproval = "current";
-    approvalDetail = "Awaiting approval.";
+    } else if (pendingList.length > 0) {
+      stepApproval = "current";
+      const names = pendingList
+        .map(
+          (a) =>
+            `${a.approver.name}${a.approverRole ? ` (${a.approverRole})` : ""}`
+        )
+        .join(", ");
+      approvalDetail = `Waiting for: ${names}.`;
+    } else if (status === "pending_approval" && approvals.length === 0) {
+      stepApproval = "current";
+      approvalDetail =
+        "IT is assigning an approver — their name will appear in Approvals below.";
+    } else if (
+      approvalComplete ||
+      !["pending_approval"].includes(status)
+    ) {
+      stepApproval = "done";
+      approvalDetail = "All required approvals are in place.";
+    } else {
+      stepApproval = "current";
+      approvalDetail = "Awaiting approval.";
+    }
   }
 
   const itActiveStatuses = [
@@ -132,15 +133,15 @@ export function TicketWorkflowTimeline({
   let stepIt: StepState;
   let itDetail: string | null = null;
 
-  if (terminal && status !== "cancelled") {
+  if (status === "resolved" || status === "closed") {
     stepIt = "done";
     itDetail = `Last update: ${STATUS_LABELS[status as TicketStatus] || status}`;
   } else if (status === "cancelled") {
     stepIt = "blocked";
     itDetail = "This request was cancelled.";
-  } else if (status === "pending_approval" || pendingList.length > 0) {
+  } else if (needsApprovalFlow && (status === "pending_approval" || pendingList.length > 0)) {
     stepIt = "upcoming";
-    itDetail = "IT will start work after approval.";
+    itDetail = "IT will continue after approval.";
   } else if (itActiveStatuses.includes(status)) {
     stepIt = "current";
     itDetail =
@@ -159,7 +160,7 @@ export function TicketWorkflowTimeline({
     doneDetail =
       status === "closed"
         ? "Ticket closed."
-        : "Marked resolved — you can reopen within 24 hours if something is still wrong.";
+        : "Resolved — you can reopen within 24 hours if needed.";
   } else if (status === "cancelled") {
     stepDone = "blocked";
     doneDetail = "No further action.";
@@ -167,25 +168,62 @@ export function TicketWorkflowTimeline({
     stepDone = "upcoming";
   }
 
+  type Step = {
+    state: StepState;
+    title: string;
+    detail: string | null;
+  };
+
+  const steps: Step[] = [
+    {
+      state: "done",
+      title: "Request received",
+      detail: "Your ticket is in the IT system.",
+    },
+  ];
+
+  if (needsApprovalFlow) {
+    steps.push({
+      state: stepApproval,
+      title: "Approval",
+      detail: approvalDetail,
+    });
+  }
+
+  steps.push(
+    {
+      state: stepIt,
+      title: "Work in progress",
+      detail: itDetail,
+    },
+    {
+      state: stepDone,
+      title: "Finished",
+      detail: doneDetail,
+    }
+  );
+
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-base">Where your request is</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <p className="text-xs text-muted-foreground mb-4">
+        <CardTitle className="text-base">Progress</CardTitle>
+        <p className="text-xs text-muted-foreground font-normal">
           Submitted {formatDateTime(createdAt)}
+          {needsApprovalFlow && pendingList.length > 0
+            ? " · Who must act is listed under Approvals."
+            : null}
         </p>
+      </CardHeader>
+      <CardContent className="pt-0">
         <div className="-mt-1">
-          {stepRow(
-            "done",
-            "Request received",
-            "Your ticket is in the IT system.",
-            true
+          {steps.map((s, idx) =>
+            stepRow(
+              s.state,
+              s.title,
+              s.detail,
+              idx < steps.length - 1
+            )
           )}
-          {stepRow(stepApproval, "Approval", approvalDetail, true)}
-          {stepRow(stepIt, "Work in progress", itDetail, true)}
-          {stepRow(stepDone, "Finished", doneDetail, false)}
         </div>
       </CardContent>
     </Card>

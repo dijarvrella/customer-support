@@ -666,24 +666,39 @@ export default function TicketDetailPage() {
 
           {/* Approvals */}
           {showApprovalsCard && (
+            <>
             <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Approvals</CardTitle>
-                {canManageApprovals && (
-                  <p className="text-xs text-muted-foreground font-normal pt-1">
-                    Use <strong>Request approval from…</strong> to route to a
-                    specific person, the requester&apos;s Entra manager, or the
-                    security lead — on any ticket type.
-                  </p>
-                )}
+              <CardHeader className="space-y-0 pb-3">
+                <div className="flex flex-row flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <CardTitle className="text-base">Approvals</CardTitle>
+                    {canManageApprovals && (
+                      <p className="text-xs text-muted-foreground font-normal">
+                        Person, Entra manager, or security lead — any ticket
+                        type.
+                      </p>
+                    )}
+                  </div>
+                  {canManageApprovals && !terminalForApprovals && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="shrink-0"
+                      onClick={() => setAddApproverOpen(true)}
+                    >
+                      Request approval…
+                    </Button>
+                  )}
+                </div>
               </CardHeader>
               <CardContent className="space-y-3">
                 {ticket.approvals.length === 0 &&
                   ticket.status === "pending_approval" && (
                     <p className="text-sm text-muted-foreground">
-                      An approver has not been assigned yet. IT can use{" "}
-                      <strong>Request approval from…</strong> below, or see{" "}
-                      <strong>Where your request is</strong> in the sidebar.
+                      {canManageApprovals
+                        ? "No approver on file yet — use Request approval above."
+                        : "Waiting for IT to assign an approver."}
                     </p>
                   )}
                 {ticket.approvals.length === 0 &&
@@ -691,9 +706,8 @@ export default function TicketDetailPage() {
                   !terminalForApprovals &&
                   ticket.status !== "pending_approval" && (
                     <p className="text-sm text-muted-foreground">
-                      No approval steps yet. Use{" "}
-                      <strong>Request approval from…</strong> if this ticket
-                      needs a manager or security sign-off.
+                      None yet — add one from the button above if you need a
+                      sign-off.
                     </p>
                   )}
                 {ticket.approvals.map((approval) => (
@@ -853,26 +867,22 @@ export default function TicketDetailPage() {
                   </div>
                 )}
 
-                {canManageApprovals && !terminalForApprovals && (
-                  <div className="pt-3 border-t">
-                    <Dialog
-                      open={addApproverOpen}
-                      onOpenChange={(open) => {
-                        setAddApproverOpen(open);
-                        if (!open) {
-                          setApproverPickSearch("");
-                          setApproverPickResults([]);
-                          setAddApproverRoute("manual");
-                          setManualDisplayTag("approver");
-                          setAddApproverError(null);
-                        }
-                      }}
-                    >
-                      <DialogTrigger asChild>
-                        <Button variant="outline" size="sm">
-                          Request approval from…
-                        </Button>
-                      </DialogTrigger>
+              </CardContent>
+            </Card>
+
+            <Dialog
+              open={addApproverOpen}
+              onOpenChange={(open) => {
+                setAddApproverOpen(open);
+                if (!open) {
+                  setApproverPickSearch("");
+                  setApproverPickResults([]);
+                  setAddApproverRoute("manual");
+                  setManualDisplayTag("approver");
+                  setAddApproverError(null);
+                }
+              }}
+            >
                       <DialogContent>
                         <DialogHeader>
                           <DialogTitle>Request approval</DialogTitle>
@@ -1040,11 +1050,8 @@ export default function TicketDetailPage() {
                           )}
                         </div>
                       </DialogContent>
-                    </Dialog>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+            </Dialog>
+            </>
           )}
 
           {/* Automation Actions */}
