@@ -11,8 +11,12 @@ import { auth } from "@/lib/auth";
 import { eq, and } from "drizzle-orm";
 import { sendApprovalRequestEmail } from "@/lib/notifications/email";
 import { userCanRequestTicketApproval } from "@/lib/constants";
+import { getManager, getCISO } from "@/lib/automations/org-chart";
+import { findOrCreateUserByEmail } from "@/lib/db/find-or-create-user";
 
 type RouteContext = { params: Promise<{ id: string }> };
+
+type Routing = "manual" | "requester_manager" | "security_ciso";
 
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
@@ -33,27 +37,36 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     const { id: ticketId } = await context.params;
     const body = await request.json();
-    const approverId = body.approverId as string | undefined;
-    const approverRole =
-      (body.approverRole as string | undefined)?.trim() || "approver";
+    const routing = body.routing as Routing | undefined;
+    const approverIdBody = body.approverId as string | undefined;
+    const approverRoleManual = (body.approverRole as string | undefined)
+      ?.trim()
+      .slice(0, 64);
 
-    if (!approverId) {
+    if (
+      !routing ||
+      !["manual", "requester_manager", "security_ciso"].includes(routing)
+    ) {
       return NextResponse.json(
-        { error: "approverId is required" },
+        {
+          error:
+            'Invalid or missing routing. Use "manual", "requester_manager", or "security_ciso".',
+        },
         { status: 400 }
       );
     }
 
     const ticket = await db.query.tickets.findFirst({
       where: eq(tickets.id, ticketId),
+      with: {
+        requester: { columns: { email: true, name: true } },
+      },
     });
 
     if (!ticket) {
       return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
     }
 
-    // Any ticket type (category, form, source) may get an IT-driven approval.
-    // Only terminal records are frozen; resolved can be pulled back for sign-off.
     if (["closed", "cancelled"].includes(ticket.status)) {
       return NextResponse.json(
         {
@@ -63,8 +76,83 @@ export async function POST(request: NextRequest, context: RouteContext) {
       );
     }
 
+    const tenantId = ticket.tenantId || undefined;
+    let resolvedApproverId: string;
+    let approverRole: string;
+
+    if (routing === "requester_manager") {
+      const reqEmail = ticket.requester?.email;
+      if (!reqEmail) {
+        return NextResponse.json(
+          {
+            error: "This ticket has no requester email; use manual routing.",
+            code: "NO_REQUESTER_EMAIL",
+          },
+          { status: 400 }
+        );
+      }
+      const manager = await getManager(reqEmail, tenantId);
+      if (!manager?.email) {
+        return NextResponse.json(
+          {
+            error:
+              "No manager is set for this requester in Microsoft Entra (or Graph is unavailable).",
+            code: "MANAGER_NOT_FOUND",
+          },
+          { status: 422 }
+        );
+      }
+      const urow = await findOrCreateUserByEmail(
+        manager.email,
+        manager.displayName
+      );
+      resolvedApproverId = urow.id;
+      approverRole = "manager";
+    } else if (routing === "security_ciso") {
+      const ciso = await getCISO(tenantId);
+      if (!ciso?.email) {
+        return NextResponse.json(
+          {
+            error:
+              "Could not resolve a security lead (CISO) from the directory.",
+            code: "CISO_NOT_FOUND",
+          },
+          { status: 422 }
+        );
+      }
+      if (
+        ticket.requester?.email &&
+        ciso.email.toLowerCase() === ticket.requester.email.toLowerCase()
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "The requester is the security lead; use manual routing to pick someone else.",
+          },
+          { status: 400 }
+        );
+      }
+      const urow = await findOrCreateUserByEmail(
+        ciso.email,
+        ciso.displayName
+      );
+      resolvedApproverId = urow.id;
+      approverRole = "security";
+    } else {
+      if (!approverIdBody) {
+        return NextResponse.json(
+          {
+            error: "approverId is required when routing is manual",
+          },
+          { status: 400 }
+        );
+      }
+      resolvedApproverId = approverIdBody;
+      approverRole = approverRoleManual || "approver";
+    }
+
     const approver = await db.query.users.findFirst({
-      where: eq(users.id, approverId),
+      where: eq(users.id, resolvedApproverId),
       columns: { id: true, name: true, email: true },
     });
 
@@ -78,7 +166,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const duplicate = await db.query.approvals.findFirst({
       where: and(
         eq(approvals.ticketId, ticketId),
-        eq(approvals.approverId, approverId),
+        eq(approvals.approverId, resolvedApproverId),
         eq(approvals.status, "pending")
       ),
     });
@@ -94,7 +182,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       .insert(approvals)
       .values({
         ticketId,
-        approverId,
+        approverId: resolvedApproverId,
         approverRole,
         status: "pending",
       })
@@ -143,8 +231,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
       action: "add_approver",
       details: {
         approvalId: row.id,
-        approverId,
+        approverId: resolvedApproverId,
         approverRole,
+        routing,
       },
     });
 

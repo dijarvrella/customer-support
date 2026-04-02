@@ -19,6 +19,13 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Card,
   CardHeader,
   CardTitle,
@@ -181,7 +188,11 @@ export default function TicketDetailPage() {
   const [approverPickResults, setApproverPickResults] = useState<
     Array<{ id: string; name: string; email: string }>
   >([]);
-  const [approverRoleInput, setApproverRoleInput] = useState("");
+  const [addApproverRoute, setAddApproverRoute] = useState<
+    "manual" | "requester_manager" | "security_ciso"
+  >("manual");
+  const [manualDisplayTag, setManualDisplayTag] = useState<string>("approver");
+  const [addApproverError, setAddApproverError] = useState<string | null>(null);
   const [submittingAddApprover, setSubmittingAddApprover] = useState(false);
 
   const [currentUser, setCurrentUser] = useState<{
@@ -316,25 +327,35 @@ export default function TicketDetailPage() {
     }
   }
 
-  async function handleAddApproverRequest(approverUserId: string) {
+  async function submitApprovalRequest(
+    payload:
+      | { routing: "requester_manager" }
+      | { routing: "security_ciso" }
+      | { routing: "manual"; approverId: string; approverRole: string }
+  ) {
     setSubmittingAddApprover(true);
+    setAddApproverError(null);
     try {
       const res = await fetch(`/api/tickets/${ticketId}/approvals`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          approverId: approverUserId,
-          approverRole: approverRoleInput.trim() || undefined,
-        }),
+        body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error("Failed to add approver");
+      const errJson = (await res.json().catch(() => null)) as {
+        error?: string;
+      } | null;
+      if (!res.ok) {
+        setAddApproverError(
+          errJson?.error || `Could not add approval (${res.status})`
+        );
+        return;
+      }
       setAddApproverOpen(false);
       setApproverPickSearch("");
       setApproverPickResults([]);
-      setApproverRoleInput("");
+      setAddApproverRoute("manual");
+      setManualDisplayTag("approver");
       await fetchTicket();
-    } catch {
-      // silent
     } finally {
       setSubmittingAddApprover(false);
     }
@@ -650,10 +671,9 @@ export default function TicketDetailPage() {
                 <CardTitle className="text-base">Approvals</CardTitle>
                 {canManageApprovals && (
                   <p className="text-xs text-muted-foreground font-normal pt-1">
-                    You can request a sign-off on{" "}
-                    <strong>any</strong> ticket type (access, hardware, VPN,
-                    Slack, etc.) whenever the process needs it — not only for
-                    forms that auto-route to approval.
+                    Use <strong>Request approval from…</strong> to route to a
+                    specific person, the requester&apos;s Entra manager, or the
+                    security lead — on any ticket type.
                   </p>
                 )}
               </CardHeader>
@@ -842,7 +862,9 @@ export default function TicketDetailPage() {
                         if (!open) {
                           setApproverPickSearch("");
                           setApproverPickResults([]);
-                          setApproverRoleInput("");
+                          setAddApproverRoute("manual");
+                          setManualDisplayTag("approver");
+                          setAddApproverError(null);
                         }
                       }}
                     >
@@ -856,52 +878,166 @@ export default function TicketDetailPage() {
                           <DialogTitle>Request approval</DialogTitle>
                           <DialogDescription>
                             Adds an approval step, sets the ticket to pending
-                            approval (if needed), and emails the approver.
+                            approval when needed, and emails the approver.
                           </DialogDescription>
                         </DialogHeader>
-                        <div className="space-y-3">
+                        <div className="space-y-4">
+                          {addApproverError && (
+                            <p className="text-sm text-destructive">
+                              {addApproverError}
+                            </p>
+                          )}
                           <div className="space-y-2">
-                            <Label>Approver role (optional)</Label>
-                            <Input
-                              placeholder="e.g. manager, security"
-                              value={approverRoleInput}
-                              onChange={(e) =>
-                                setApproverRoleInput(e.target.value)
-                              }
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label>Search user</Label>
-                            <Input
-                              placeholder="Name or email…"
-                              value={approverPickSearch}
-                              onChange={(e) => {
-                                setApproverPickSearch(e.target.value);
-                                searchUsers(e.target.value, "approver");
+                            <Label>Route to</Label>
+                            <Select
+                              value={addApproverRoute}
+                              onValueChange={(v) => {
+                                setAddApproverRoute(
+                                  v as typeof addApproverRoute
+                                );
+                                setAddApproverError(null);
                               }}
-                            />
-                            {searchingUsers && (
-                              <p className="text-xs text-muted-foreground">
-                                Searching…
-                              </p>
-                            )}
-                            <div className="max-h-48 overflow-y-auto space-y-1">
-                              {approverPickResults.map((u) => (
-                                <button
-                                  key={u.id}
-                                  type="button"
-                                  disabled={submittingAddApprover}
-                                  onClick={() => handleAddApproverRequest(u.id)}
-                                  className="w-full text-left p-2 rounded-md hover:bg-accent flex items-center justify-between text-sm"
-                                >
-                                  <span className="font-medium">{u.name}</span>
-                                  <span className="text-xs text-muted-foreground">
-                                    {u.email}
-                                  </span>
-                                </button>
-                              ))}
-                            </div>
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Choose routing" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="manual">
+                                  A specific person (search below)
+                                </SelectItem>
+                                <SelectItem value="requester_manager">
+                                  Requester&apos;s manager (Microsoft Entra)
+                                </SelectItem>
+                                <SelectItem value="security_ciso">
+                                  Security lead / CISO (directory lookup)
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
                           </div>
+
+                          {addApproverRoute === "manual" && (
+                            <>
+                              <div className="space-y-2">
+                                <Label>Show on ticket as</Label>
+                                <Select
+                                  value={manualDisplayTag}
+                                  onValueChange={setManualDisplayTag}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="approver">
+                                      Approver
+                                    </SelectItem>
+                                    <SelectItem value="manager">
+                                      Manager (label only)
+                                    </SelectItem>
+                                    <SelectItem value="security">
+                                      Security (label only)
+                                    </SelectItem>
+                                    <SelectItem value="compliance">
+                                      Compliance (label only)
+                                    </SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                <p className="text-xs text-muted-foreground">
+                                  For this option you choose the person in
+                                  search. The dropdown only changes the tag
+                                  next to their name — it does not pick someone
+                                  automatically.
+                                </p>
+                              </div>
+                              <div className="space-y-2">
+                                <Label>Search user</Label>
+                                <Input
+                                  placeholder="Name or email…"
+                                  value={approverPickSearch}
+                                  onChange={(e) => {
+                                    setApproverPickSearch(e.target.value);
+                                    searchUsers(e.target.value, "approver");
+                                  }}
+                                />
+                                {searchingUsers && (
+                                  <p className="text-xs text-muted-foreground">
+                                    Searching…
+                                  </p>
+                                )}
+                                <div className="max-h-48 overflow-y-auto space-y-1">
+                                  {approverPickResults.map((u) => (
+                                    <button
+                                      key={u.id}
+                                      type="button"
+                                      disabled={submittingAddApprover}
+                                      onClick={() =>
+                                        submitApprovalRequest({
+                                          routing: "manual",
+                                          approverId: u.id,
+                                          approverRole: manualDisplayTag,
+                                        })
+                                      }
+                                      className="w-full text-left p-2 rounded-md hover:bg-accent flex items-center justify-between text-sm"
+                                    >
+                                      <span className="font-medium">
+                                        {u.name}
+                                      </span>
+                                      <span className="text-xs text-muted-foreground">
+                                        {u.email}
+                                      </span>
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            </>
+                          )}
+
+                          {addApproverRoute === "requester_manager" && (
+                            <div className="space-y-3">
+                              <p className="text-sm text-muted-foreground">
+                                Looks up the ticket requester&apos;s{" "}
+                                <strong>direct manager</strong> in Entra and
+                                sends them the approval email. No search needed.
+                              </p>
+                              <Button
+                                type="button"
+                                disabled={submittingAddApprover}
+                                onClick={() =>
+                                  submitApprovalRequest({
+                                    routing: "requester_manager",
+                                  })
+                                }
+                              >
+                                {submittingAddApprover ? (
+                                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                ) : null}
+                                Send to requester&apos;s manager
+                              </Button>
+                            </div>
+                          )}
+
+                          {addApproverRoute === "security_ciso" && (
+                            <div className="space-y-3">
+                              <p className="text-sm text-muted-foreground">
+                                Resolves your org&apos;s security lead (CISO)
+                                using the same directory rules as automated
+                                firewall/access requests, then emails them.
+                              </p>
+                              <Button
+                                type="button"
+                                disabled={submittingAddApprover}
+                                onClick={() =>
+                                  submitApprovalRequest({
+                                    routing: "security_ciso",
+                                  })
+                                }
+                              >
+                                {submittingAddApprover ? (
+                                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                ) : null}
+                                Send to security lead
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       </DialogContent>
                     </Dialog>

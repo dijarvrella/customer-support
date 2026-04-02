@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { tickets, approvals, auditLog, users } from "@/lib/db/schema";
+import { tickets, approvals, auditLog } from "@/lib/db/schema";
 import { auth } from "@/lib/auth";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { generateTicketNumber } from "@/lib/utils";
 import { DEFAULT_SLA, type TicketPriority } from "@/lib/constants";
 import { getRequiredApprovers } from "@/lib/automations/org-chart";
+import { findOrCreateUserByEmail } from "@/lib/db/find-or-create-user";
 import {
   sendTicketCreatedEmail,
   sendApprovalRequestEmail,
@@ -43,33 +44,6 @@ function generateTitle(slug: string, data: Record<string, unknown>): string {
 
   const prefix = slugTitles[slug] || slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
   return `${prefix}: ${nameStr}`;
-}
-
-async function findOrCreateUser(
-  email: string,
-  name?: string
-): Promise<{ id: string }> {
-  // Case-insensitive lookup
-  const existing = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(sql`LOWER(${users.email}) = LOWER(${email})`)
-    .limit(1);
-
-  if (existing.length > 0) return existing[0];
-
-  // Create stub user
-  const [created] = await db
-    .insert(users)
-    .values({
-      email: email.toLowerCase(),
-      name: name || email.split("@")[0],
-      role: "end_user",
-      isActive: true,
-    })
-    .returning({ id: users.id });
-
-  return created;
 }
 
 export async function POST(request: NextRequest, context: RouteContext) {
@@ -144,7 +118,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         const orgApprovers = await getRequiredApprovers(requesterEmail, slug);
 
         for (const approverInfo of orgApprovers) {
-          const approverUser = await findOrCreateUser(
+          const approverUser = await findOrCreateUserByEmail(
             approverInfo.email,
             approverInfo.name
           );
@@ -170,7 +144,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
               (data.supervisorName as string) ||
               supervisorEmail.split("@")[0];
 
-            const approverUser = await findOrCreateUser(
+            const approverUser = await findOrCreateUserByEmail(
               supervisorEmail,
               supervisorName
             );
@@ -189,7 +163,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
           (data.supervisor_email as string) ||
           (data.manager_email as string);
         if (supervisorEmail) {
-          const approverUser = await findOrCreateUser(supervisorEmail);
+          const approverUser = await findOrCreateUserByEmail(supervisorEmail);
           await db.insert(approvals).values({
             ticketId: ticket.id,
             approverId: approverUser.id,
