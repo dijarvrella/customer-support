@@ -1099,7 +1099,7 @@ export default function TicketDetailPage() {
                           : "bg-muted/50"
                       }`}
                     >
-                      <div className="flex items-center gap-2 mb-2">
+                      <div className="flex items-center gap-2 mb-3">
                         <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10">
                           <User className="h-3 w-3 text-primary" />
                         </div>
@@ -1119,9 +1119,7 @@ export default function TicketDetailPage() {
                           {timeAgo(comment.createdAt)}
                         </span>
                       </div>
-                      <p className="text-sm whitespace-pre-wrap leading-relaxed pl-8">
-                        {comment.body}
-                      </p>
+                      <CommentBody body={comment.body} isInternal={comment.isInternal} />
                     </div>
                   ))}
                 </div>
@@ -1404,6 +1402,50 @@ export default function TicketDetailPage() {
           </Card>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Markdown-aware comment renderer ─────────────────────────────────────────
+
+function InlineMd({ text }: { text: string }) {
+  // Split on **bold** and `code` tokens
+  const parts = text.split(/(\*\*[^*\n]+\*\*|`[^`\n]+`)/);
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
+          return <strong key={i}>{part.slice(2, -2)}</strong>;
+        }
+        if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
+          return (
+            <code
+              key={i}
+              className="bg-black/10 text-foreground px-1.5 py-0.5 rounded text-xs font-mono"
+            >
+              {part.slice(1, -1)}
+            </code>
+          );
+        }
+        return <span key={i}>{part}</span>;
+      })}
+    </>
+  );
+}
+
+function CommentBody({ body, isInternal }: { body: string; isInternal: boolean }) {
+  const lines = body.split("\n");
+  return (
+    <div className={`text-sm leading-relaxed pl-8 space-y-0.5 ${isInternal ? "" : ""}`}>
+      {lines.map((line, i) =>
+        line === "" ? (
+          <div key={i} className="h-1.5" />
+        ) : (
+          <div key={i}>
+            <InlineMd text={line} />
+          </div>
+        )
+      )}
     </div>
   );
 }

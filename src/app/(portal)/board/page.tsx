@@ -10,6 +10,13 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   LayoutGrid,
   Filter,
   Search,
@@ -18,6 +25,12 @@ import {
   Loader2,
   ShieldCheck,
 } from "lucide-react";
+
+interface UserOption {
+  id: string;
+  name: string;
+  email: string;
+}
 import {
   TICKET_PRIORITIES,
   PRIORITY_LABELS,
@@ -118,6 +131,20 @@ export default function BoardPage() {
     new Set()
   );
   const [showPriorityMenu, setShowPriorityMenu] = useState(false);
+  const [assigneeFilter, setAssigneeFilter] = useState<string>("all");
+  const [assigneeOptions, setAssigneeOptions] = useState<UserOption[]>([]);
+
+  // Fetch assignable users (agents + admins)
+  useEffect(() => {
+    fetch("/api/users")
+      .then((r) => r.json())
+      .then((data: UserOption[]) => {
+        setAssigneeOptions(
+          data.filter((u) => u.name).sort((a, b) => (a.name || "").localeCompare(b.name || ""))
+        );
+      })
+      .catch(() => {});
+  }, []);
 
   // Drag-and-drop state
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
@@ -153,26 +180,28 @@ export default function BoardPage() {
       if (ticket.tags && ticket.tags.toLowerCase().includes("iso")) {
         return false;
       }
-      if (
-        priorityFilters.size > 0 &&
-        !priorityFilters.has(ticket.priority)
-      ) {
+      if (priorityFilters.size > 0 && !priorityFilters.has(ticket.priority)) {
         return false;
+      }
+      if (assigneeFilter !== "all") {
+        if (assigneeFilter === "unassigned") {
+          if (ticket.assignee) return false;
+        } else {
+          if (ticket.assignee?.email !== assigneeFilter) return false;
+        }
       }
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchesTitle = ticket.title.toLowerCase().includes(q);
         const matchesNumber = ticket.ticketNumber.toLowerCase().includes(q);
-        const matchesAssignee = ticket.assignee?.name
-          ?.toLowerCase()
-          .includes(q);
+        const matchesAssignee = ticket.assignee?.name?.toLowerCase().includes(q);
         if (!matchesTitle && !matchesNumber && !matchesAssignee) {
           return false;
         }
       }
       return true;
     });
-  }, [tickets, searchQuery, priorityFilters]);
+  }, [tickets, searchQuery, priorityFilters, assigneeFilter]);
 
   // Group tickets by board column
   const columnTickets = useMemo(() => {
@@ -313,6 +342,23 @@ export default function BoardPage() {
             All Tickets
           </Button>
         </div>
+
+        {/* Assignee filter */}
+        <Select value={assigneeFilter} onValueChange={setAssigneeFilter}>
+          <SelectTrigger className="w-[180px] text-xs h-9">
+            <User className="h-3.5 w-3.5 mr-1.5 text-muted-foreground" />
+            <SelectValue placeholder="All People" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All People</SelectItem>
+            <SelectItem value="unassigned">Unassigned</SelectItem>
+            {assigneeOptions.map((u) => (
+              <SelectItem key={u.email} value={u.email}>
+                {u.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
         {/* Priority filter */}
         <div className="relative">

@@ -78,17 +78,46 @@ export async function POST(request: NextRequest) {
       .where(eq(tickets.id, ticketId));
 
     // Add automation result as a comment
+    function summariseOffboardingStep(s: (typeof result.steps)[number]): string {
+      if (s.error) return s.error;
+      const d = s.details;
+      switch (s.step) {
+        case "lookup_user":
+          return `Found **${d.displayName}** (${d.companyEmail})`;
+        case "disable_account": {
+          const at = d.disabledAt ? new Date(d.disabledAt as string).toLocaleString() : "";
+          return `Account disabled${at ? ` at ${at}` : ""}`;
+        }
+        case "revoke_sessions":
+          return `All active sessions invalidated`;
+        case "get_licenses": {
+          const names = (d.licenseNames as string[]) || [];
+          return `Found ${d.count} license(s)${names.length ? `: ${names.join(", ")}` : ""}`;
+        }
+        case "remove_licenses":
+          return (d.message as string) || `Removed ${d.removedCount} license(s)`;
+        case "get_group_memberships": {
+          const groups = (d.groups as string[]) || [];
+          return `Found ${d.groupCount} group(s)${groups.length ? `: ${groups.join(", ")}` : ""}`;
+        }
+        case "remove_from_groups":
+          if (d.message) return d.message as string;
+          return `Removed from ${d.succeeded}/${d.attempted} group(s)${d.failed ? ` — ${d.failed} failed` : ""}`;
+        default:
+          return Object.entries(d).map(([k, v]) => `${k}: ${v}`).join(", ");
+      }
+    }
+
     const stepsReport = result.steps
-      .map(
-        (s) =>
-          `${s.success ? "✅" : "❌"} **${s.step}**: ${s.error || JSON.stringify(s.details)}`
-      )
+      .map((s) => `${s.success ? "✅" : "❌"} **${s.step}**: ${summariseOffboardingStep(s)}`)
       .join("\n");
 
     const commentBody = [
       `**Offboarding Automation ${result.success ? "Completed" : "Completed with Errors"}**`,
       "",
-      result.disabledAt ? `**Account disabled at:** ${result.disabledAt}` : "",
+      result.disabledAt
+        ? `**Account disabled at:** ${new Date(result.disabledAt).toLocaleString()}`
+        : "",
       "",
       "**Steps:**",
       stepsReport,

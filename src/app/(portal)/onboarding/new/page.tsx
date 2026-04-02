@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,11 +19,135 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-  CardDescription,
 } from "@/components/ui/card";
 import { onboardingFormSchema } from "@/lib/forms/onboarding";
-import { ArrowLeft, Send, UserPlus, Loader2 } from "lucide-react";
+import { ArrowLeft, Send, UserPlus, Loader2, Search, X } from "lucide-react";
 import Link from "next/link";
+
+// ── User picker component ────────────────────────────────────────────────────
+
+interface UserOption {
+  id: string;
+  name: string;
+  email: string;
+  department?: string;
+}
+
+function UserPickerField({
+  label,
+  required,
+  selectedName,
+  selectedEmail,
+  onSelect,
+  onClear,
+}: {
+  label: string;
+  required?: boolean;
+  selectedName: string;
+  selectedEmail: string;
+  onSelect: (user: UserOption) => void;
+  onClear: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<UserOption[]>([]);
+  const [open, setOpen] = useState(false);
+  const [fetching, setFetching] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  useEffect(() => {
+    if (!query.trim()) {
+      setResults([]);
+      return;
+    }
+    setFetching(true);
+    const timer = setTimeout(() => {
+      fetch(`/api/users?search=${encodeURIComponent(query)}`)
+        .then((r) => r.json())
+        .then((data: UserOption[]) => {
+          setResults(data.slice(0, 8));
+          setOpen(true);
+        })
+        .catch(() => {})
+        .finally(() => setFetching(false));
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  const isSelected = !!selectedName || !!selectedEmail;
+
+  return (
+    <div className="space-y-2">
+      <Label>
+        {label}
+        {required && <span className="text-destructive ml-1">*</span>}
+      </Label>
+
+      {isSelected ? (
+        <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium truncate">{selectedName || selectedEmail}</p>
+            {selectedEmail && selectedName && (
+              <p className="text-xs text-muted-foreground truncate">{selectedEmail}</p>
+            )}
+          </div>
+          <button
+            type="button"
+            title="Clear selection"
+            onClick={onClear}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      ) : (
+        <div ref={containerRef} className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            className="pl-9"
+            placeholder="Search by name or email..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onFocus={() => results.length > 0 && setOpen(true)}
+          />
+          {fetching && (
+            <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
+          )}
+          {open && results.length > 0 && (
+            <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md">
+              {results.map((u) => (
+                <button
+                  key={u.id}
+                  type="button"
+                  className="w-full flex items-start gap-3 px-3 py-2 text-left hover:bg-accent text-sm"
+                  onClick={() => {
+                    onSelect(u);
+                    setQuery("");
+                    setOpen(false);
+                  }}
+                >
+                  <div className="min-w-0">
+                    <p className="font-medium truncate">{u.name}</p>
+                    <p className="text-xs text-muted-foreground truncate">{u.email}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 type FormValues = Record<string, string | string[] | boolean | number>;
 
@@ -103,10 +227,58 @@ export default function OnboardingFormPage() {
     }
   }
 
+  // Fields rendered via UserPickerField — supervisor_email is auto-filled from supervisor_name picker
+  const USER_PICKER_FIELDS = ["supervisor_name"];
+  const USER_PICKER_EMAIL_SHADOW = new Set(["supervisor_email"]);
+
   function renderField(field: any) {
     if (!isConditionMet(field)) return null;
 
     const fieldId = field.id;
+
+    // supervisor_name → user picker that also fills supervisor_email
+    if (USER_PICKER_FIELDS.includes(fieldId)) {
+      return (
+        <UserPickerField
+          key={fieldId}
+          label={field.label}
+          required={field.required}
+          selectedName={(values["supervisor_name"] as string) || ""}
+          selectedEmail={(values["supervisor_email"] as string) || ""}
+          onSelect={(u) => {
+            setValue("supervisor_name", u.name);
+            setValue("supervisor_email", u.email);
+          }}
+          onClear={() => {
+            setValue("supervisor_name", "");
+            setValue("supervisor_email", "");
+          }}
+        />
+      );
+    }
+
+    // supervisor_email is auto-filled from the picker above — show read-only hint
+    if (USER_PICKER_EMAIL_SHADOW.has(fieldId)) {
+      const email = (values[fieldId] as string) || "";
+      return (
+        <div key={fieldId} className="space-y-2">
+          <Label htmlFor={fieldId}>
+            {field.label}
+            {field.required && <span className="text-destructive ml-1">*</span>}
+          </Label>
+          <Input
+            id={fieldId}
+            type="email"
+            value={email}
+            onChange={(e) => setValue(fieldId, e.target.value)}
+            placeholder="Auto-filled from manager selection above"
+          />
+          {field.helperText && (
+            <p className="text-xs text-muted-foreground">{field.helperText}</p>
+          )}
+        </div>
+      );
+    }
 
     switch (field.type) {
       case "text":

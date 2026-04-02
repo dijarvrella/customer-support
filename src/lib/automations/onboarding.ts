@@ -371,33 +371,48 @@ export async function executeOnboarding(
   // ── Step 5: Set manager if provided ───────────────────────────────────────
   if (userId && formData.supervisor_email) {
     try {
-      // Look up manager by email
       const mgrEmail = formData.supervisor_email as string;
-      const mgrResult = (await graphRequest(
+
+      // Use $filter to search by UPN or mail — more reliable than direct path lookup
+      const mgrSearch = (await graphRequest(
         "GET",
-        `/users/${encodeURIComponent(mgrEmail)}?$select=id`,
+        `/users?$filter=userPrincipalName eq '${mgrEmail}' or mail eq '${mgrEmail}'&$select=id,userPrincipalName,mail&$top=1`,
         null,
         tenantId
-      )) as any;
+      )) as { value: Array<Record<string, unknown>> };
 
-      if (mgrResult?.id) {
+      const mgr = mgrSearch?.value?.[0];
+
+      if (mgr?.id) {
         await graphRequest(
           "PUT",
           `/users/${userId}/manager/$ref`,
           {
-            "@odata.id": `https://graph.microsoft.com/v1.0/users/${mgrResult.id}`,
+            "@odata.id": `https://graph.microsoft.com/v1.0/users/${mgr.id}`,
           },
           tenantId
         );
         steps.push({
           step: "set_manager",
           success: true,
-          details: { managerEmail: mgrEmail },
+          details: { managerEmail: mgrEmail, managerId: mgr.id },
         });
         await logAuditStep("set_manager", ticketId, actorId, {
           userId,
           managerEmail: mgrEmail,
-          managerId: mgrResult.id,
+          managerId: mgr.id,
+        });
+      } else {
+        steps.push({
+          step: "set_manager",
+          success: false,
+          details: { managerEmail: mgrEmail },
+          error: `Manager not found: no user with UPN or mail matching "${mgrEmail}"`,
+        });
+        await logAuditStep("set_manager", ticketId, actorId, {
+          userId,
+          managerEmail: mgrEmail,
+          error: "Manager not found in directory",
         });
       }
     } catch (err) {
@@ -406,6 +421,11 @@ export async function executeOnboarding(
         step: "set_manager",
         success: false,
         details: { managerEmail: formData.supervisor_email },
+        error,
+      });
+      await logAuditStep("set_manager", ticketId, actorId, {
+        userId,
+        managerEmail: formData.supervisor_email,
         error,
       });
     }

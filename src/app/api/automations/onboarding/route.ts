@@ -78,19 +78,33 @@ export async function POST(request: NextRequest) {
       .where(eq(tickets.id, ticketId));
 
     // Add automation result as a comment
+    function summariseOnboardingStep(s: (typeof result.steps)[number]): string {
+      if (s.error) return s.error;
+      const d = s.details;
+      switch (s.step) {
+        case "create_user":
+          return `Created **${d.userPrincipalName}** — display name: ${d.displayName}`;
+        case "assign_license":
+          return `Assigned license **${d.licenseName}**`;
+        case "add_to_group":
+          return `Added to group **"${d.groupName}"**`;
+        case "add_to_zimark_general":
+          return `Added to group **"${d.groupName}"**`;
+        case "set_manager":
+          return `Manager set to **${d.managerEmail}**`;
+        default:
+          return Object.entries(d).map(([k, v]) => `${k}: ${v}`).join(", ");
+      }
+    }
+
     const stepsReport = result.steps
-      .map(
-        (s) =>
-          `${s.success ? "✅" : "❌"} **${s.step}**: ${s.error || JSON.stringify(s.details)}`
-      )
+      .map((s) => `${s.success ? "✅" : "❌"} **${s.step}**: ${summariseOnboardingStep(s)}`)
       .join("\n");
 
     const commentBody = [
       `**Onboarding Automation ${result.success ? "Completed" : "Completed with Errors"}**`,
       "",
-      result.userPrincipalName
-        ? `**User:** ${result.userPrincipalName}`
-        : "",
+      result.userPrincipalName ? `**User:** ${result.userPrincipalName}` : "",
       result.licenseName ? `**License:** ${result.licenseName}` : "",
       result.tempPassword
         ? `**Temp Password:** \`${result.tempPassword}\` (user must change on first sign-in)`
