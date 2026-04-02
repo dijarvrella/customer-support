@@ -6,6 +6,10 @@ import { eq, sql } from "drizzle-orm";
 import { generateTicketNumber } from "@/lib/utils";
 import { DEFAULT_SLA, type TicketPriority } from "@/lib/constants";
 import { getRequiredApprovers } from "@/lib/automations/org-chart";
+import {
+  sendTicketCreatedEmail,
+  sendApprovalRequestEmail,
+} from "@/lib/notifications/email";
 
 type RouteContext = { params: Promise<{ slug: string }> };
 
@@ -211,6 +215,50 @@ export async function POST(request: NextRequest, context: RouteContext) {
         approvalRequired,
       },
     });
+
+    const portalUrl = `${request.nextUrl.origin}/tickets/${ticket.id}`;
+    const requesterEmail = session.user.email;
+
+    if (requesterEmail) {
+      sendTicketCreatedEmail(
+        requesterEmail,
+        ticket.ticketNumber,
+        ticket.title,
+        portalUrl
+      ).catch((err) =>
+        console.error("Form submit: ticket created email failed:", err)
+      );
+    }
+
+    if (approvalRequired) {
+      const pendingForTicket = await db.query.approvals.findMany({
+        where: eq(approvals.ticketId, ticket.id),
+        with: {
+          approver: { columns: { name: true, email: true } },
+        },
+      });
+
+      const emailed = new Set<string>();
+      for (const row of pendingForTicket) {
+        if (row.status !== "pending") continue;
+        const to = row.approver.email?.trim().toLowerCase();
+        if (!to || emailed.has(to)) continue;
+        emailed.add(to);
+        sendApprovalRequestEmail(
+          to,
+          row.approver.name || to,
+          ticket.ticketNumber,
+          ticket.title,
+          session.user.name || session.user.email || "A colleague",
+          portalUrl
+        ).catch((err) =>
+          console.error(
+            `Form submit: approval request email failed (${to}):`,
+            err
+          )
+        );
+      }
+    }
 
     return NextResponse.json(ticket, { status: 201 });
   } catch (error) {

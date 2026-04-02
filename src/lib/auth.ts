@@ -199,8 +199,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           console.error("Error during SSO user lookup/creation:", err);
         }
 
-        // Global admin override
-        if (email === GLOBAL_ADMIN_EMAIL) {
+        // Global admin override (case-insensitive match on profile email)
+        if (email.toLowerCase() === GLOBAL_ADMIN_EMAIL.toLowerCase()) {
           token.role = "it_admin";
           token.isGlobalAdmin = true;
         }

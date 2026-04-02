@@ -39,6 +39,7 @@ import {
   PRIORITY_LABELS,
   STATUS_COLORS,
   PRIORITY_COLORS,
+  userCanRequestTicketApproval,
   type TicketStatus,
   type TicketPriority,
 } from "@/lib/constants";
@@ -63,6 +64,7 @@ import {
   MoreHorizontal,
 } from "lucide-react";
 import { AutomationActions } from "@/components/tickets/automation-actions";
+import { TicketWorkflowTimeline } from "@/components/tickets/ticket-workflow-timeline";
 
 interface TicketDetail {
   id: string;
@@ -174,9 +176,18 @@ export default function TicketDetailPage() {
   const [approvalComment, setApprovalComment] = useState("");
   const [submittingApproval, setSubmittingApproval] = useState(false);
 
+  const [addApproverOpen, setAddApproverOpen] = useState(false);
+  const [approverPickSearch, setApproverPickSearch] = useState("");
+  const [approverPickResults, setApproverPickResults] = useState<
+    Array<{ id: string; name: string; email: string }>
+  >([]);
+  const [approverRoleInput, setApproverRoleInput] = useState("");
+  const [submittingAddApprover, setSubmittingAddApprover] = useState(false);
+
   const [currentUser, setCurrentUser] = useState<{
     id: string;
     role: string;
+    isGlobalAdmin?: boolean;
   } | null>(null);
 
   useEffect(() => {
@@ -184,9 +195,15 @@ export default function TicketDetailPage() {
       .then((res) => res.json())
       .then((session) => {
         if (session?.user) {
+          const u = session.user as {
+            id: string;
+            role?: string;
+            isGlobalAdmin?: boolean;
+          };
           setCurrentUser({
-            id: session.user.id,
-            role: session.user.role || "end_user",
+            id: u.id,
+            role: u.role || "end_user",
+            isGlobalAdmin: u.isGlobalAdmin === true,
           });
         }
       })
@@ -196,6 +213,12 @@ export default function TicketDetailPage() {
   const isAgent =
     currentUser &&
     ["it_agent", "it_lead", "it_admin"].includes(currentUser.role);
+
+  const canManageApprovals =
+    !!currentUser &&
+    userCanRequestTicketApproval(currentUser.role, {
+      isGlobalAdmin: currentUser.isGlobalAdmin,
+    });
 
   const fetchTicket = useCallback(async () => {
     try {
@@ -264,9 +287,14 @@ export default function TicketDetailPage() {
     }
   }
 
-  async function searchUsers(query: string, target: "assign" | "requester") {
+  async function searchUsers(
+    query: string,
+    target: "assign" | "requester" | "approver"
+  ) {
     if (query.length < 2) {
-      target === "assign" ? setUserResults([]) : setRequesterResults([]);
+      if (target === "assign") setUserResults([]);
+      else if (target === "requester") setRequesterResults([]);
+      else setApproverPickResults([]);
       return;
     }
     setSearchingUsers(true);
@@ -274,11 +302,41 @@ export default function TicketDetailPage() {
       const res = await fetch(`/api/users?search=${encodeURIComponent(query)}&limit=10`);
       if (res.ok) {
         const data = await res.json();
-        const results = data.map((u: any) => ({ id: u.id, name: u.name, email: u.email }));
-        target === "assign" ? setUserResults(results) : setRequesterResults(results);
+        const results = data.map((u: { id: string; name: string; email: string }) => ({
+          id: u.id,
+          name: u.name,
+          email: u.email,
+        }));
+        if (target === "assign") setUserResults(results);
+        else if (target === "requester") setRequesterResults(results);
+        else setApproverPickResults(results);
       }
     } finally {
       setSearchingUsers(false);
+    }
+  }
+
+  async function handleAddApproverRequest(approverUserId: string) {
+    setSubmittingAddApprover(true);
+    try {
+      const res = await fetch(`/api/tickets/${ticketId}/approvals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          approverId: approverUserId,
+          approverRole: approverRoleInput.trim() || undefined,
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to add approver");
+      setAddApproverOpen(false);
+      setApproverPickSearch("");
+      setApproverPickResults([]);
+      setApproverRoleInput("");
+      await fetchTicket();
+    } catch {
+      // silent
+    } finally {
+      setSubmittingAddApprover(false);
     }
   }
 
@@ -326,7 +384,7 @@ export default function TicketDetailPage() {
       if (!pendingApproval) return;
 
       const res = await fetch(`/api/approvals/${pendingApproval.id}`, {
-        method: "PATCH",
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           decision: approvalDecision,
@@ -373,6 +431,12 @@ export default function TicketDetailPage() {
   const pendingApprovalForUser = ticket.approvals.find(
     (a) => a.status === "pending" && a.approver.id === currentUser?.id
   );
+
+  const terminalForApprovals = ["closed", "cancelled"].includes(ticket.status);
+  const showApprovalsCard =
+    ticket.approvals.length > 0 ||
+    ticket.status === "pending_approval" ||
+    (canManageApprovals && !terminalForApprovals);
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
@@ -580,12 +644,38 @@ export default function TicketDetailPage() {
           )}
 
           {/* Approvals */}
-          {ticket.approvals.length > 0 && (
+          {showApprovalsCard && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Approvals</CardTitle>
+                {canManageApprovals && (
+                  <p className="text-xs text-muted-foreground font-normal pt-1">
+                    You can request a sign-off on{" "}
+                    <strong>any</strong> ticket type (access, hardware, VPN,
+                    Slack, etc.) whenever the process needs it — not only for
+                    forms that auto-route to approval.
+                  </p>
+                )}
               </CardHeader>
               <CardContent className="space-y-3">
+                {ticket.approvals.length === 0 &&
+                  ticket.status === "pending_approval" && (
+                    <p className="text-sm text-muted-foreground">
+                      An approver has not been assigned yet. IT can use{" "}
+                      <strong>Request approval from…</strong> below, or see{" "}
+                      <strong>Where your request is</strong> in the sidebar.
+                    </p>
+                  )}
+                {ticket.approvals.length === 0 &&
+                  canManageApprovals &&
+                  !terminalForApprovals &&
+                  ticket.status !== "pending_approval" && (
+                    <p className="text-sm text-muted-foreground">
+                      No approval steps yet. Use{" "}
+                      <strong>Request approval from…</strong> if this ticket
+                      needs a manager or security sign-off.
+                    </p>
+                  )}
                 {ticket.approvals.map((approval) => (
                   <div
                     key={approval.id}
@@ -742,6 +832,81 @@ export default function TicketDetailPage() {
                     </Dialog>
                   </div>
                 )}
+
+                {canManageApprovals && !terminalForApprovals && (
+                  <div className="pt-3 border-t">
+                    <Dialog
+                      open={addApproverOpen}
+                      onOpenChange={(open) => {
+                        setAddApproverOpen(open);
+                        if (!open) {
+                          setApproverPickSearch("");
+                          setApproverPickResults([]);
+                          setApproverRoleInput("");
+                        }
+                      }}
+                    >
+                      <DialogTrigger asChild>
+                        <Button variant="outline" size="sm">
+                          Request approval from…
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>Request approval</DialogTitle>
+                          <DialogDescription>
+                            Adds an approval step, sets the ticket to pending
+                            approval (if needed), and emails the approver.
+                          </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-3">
+                          <div className="space-y-2">
+                            <Label>Approver role (optional)</Label>
+                            <Input
+                              placeholder="e.g. manager, security"
+                              value={approverRoleInput}
+                              onChange={(e) =>
+                                setApproverRoleInput(e.target.value)
+                              }
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Search user</Label>
+                            <Input
+                              placeholder="Name or email…"
+                              value={approverPickSearch}
+                              onChange={(e) => {
+                                setApproverPickSearch(e.target.value);
+                                searchUsers(e.target.value, "approver");
+                              }}
+                            />
+                            {searchingUsers && (
+                              <p className="text-xs text-muted-foreground">
+                                Searching…
+                              </p>
+                            )}
+                            <div className="max-h-48 overflow-y-auto space-y-1">
+                              {approverPickResults.map((u) => (
+                                <button
+                                  key={u.id}
+                                  type="button"
+                                  disabled={submittingAddApprover}
+                                  onClick={() => handleAddApproverRequest(u.id)}
+                                  className="w-full text-left p-2 rounded-md hover:bg-accent flex items-center justify-between text-sm"
+                                >
+                                  <span className="font-medium">{u.name}</span>
+                                  <span className="text-xs text-muted-foreground">
+                                    {u.email}
+                                  </span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </DialogContent>
+                    </Dialog>
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}
@@ -867,6 +1032,11 @@ export default function TicketDetailPage() {
 
         {/* Info Sidebar */}
         <div className="space-y-6">
+          <TicketWorkflowTimeline
+            status={ticket.status}
+            createdAt={ticket.createdAt}
+            approvals={ticket.approvals}
+          />
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Details</CardTitle>

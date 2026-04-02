@@ -29,6 +29,24 @@ export const USER_ROLES = [
 ] as const;
 export type UserRole = (typeof USER_ROLES)[number];
 
+/** IT / HR / security: may add an approval step on any ticket (any category or source). */
+export const ROLES_CAN_REQUEST_TICKET_APPROVAL = [
+  "it_agent",
+  "it_lead",
+  "it_admin",
+  "hr",
+  "security",
+] as const satisfies readonly UserRole[];
+
+/** Global admin always allowed (session may expose `isGlobalAdmin` even if DB role lags). */
+export function userCanRequestTicketApproval(
+  role: string,
+  opts?: { isGlobalAdmin?: boolean }
+): boolean {
+  if (opts?.isGlobalAdmin) return true;
+  return (ROLES_CAN_REQUEST_TICKET_APPROVAL as readonly string[]).includes(role);
+}
+
 export const APPROVAL_DECISIONS = [
   "approved",
   "rejected",
