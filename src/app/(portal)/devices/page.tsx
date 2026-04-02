@@ -119,7 +119,7 @@ function getFriendlyOsVersion(os: string, rawVersion: string): string {
     const parts = rawVersion.split(".");
     const build = parts.length >= 3 ? parseInt(parts[2], 10) : 0;
 
-    if (build >= 26200) return "Windows 11 24H2";
+    if (build >= 26200) return "Windows 11 25H2";
     if (build >= 26100) return "Windows 11 24H2";
     if (build >= 22631) return "Windows 11 23H2";
     if (build >= 22621) return "Windows 11 22H2";
@@ -875,7 +875,7 @@ export default function DevicesPage() {
                       {action1Data.vulnerabilities.length === 0 ? (
                         <p className="text-sm text-green-600 dark:text-green-400">No vulnerabilities found</p>
                       ) : (
-                        <div className="space-y-1.5">
+                        <div className="space-y-1.5 max-h-[220px] overflow-y-auto pr-1">
                           {action1Data.vulnerabilities.map((v, i) => {
                             const score = parseFloat(v.cvss_score ?? "0");
                             const severity = score >= 9 ? "Critical" : score >= 7 ? "High" : score >= 4 ? "Medium" : "Low";
@@ -913,7 +913,7 @@ export default function DevicesPage() {
                       {action1Data.installedSoftware.length === 0 ? (
                         <p className="text-sm text-muted-foreground">No data available</p>
                       ) : (
-                        <div className="space-y-0.5">
+                        <div className="space-y-0.5 max-h-[180px] overflow-y-auto pr-1">
                           {action1Data.installedSoftware.map((s, i) => (
                             <div key={i} className="text-xs px-3 py-1 rounded bg-muted/40 truncate">{s.name}</div>
                           ))}
@@ -936,7 +936,7 @@ export default function DevicesPage() {
                       {action1Data.automationHistory.length === 0 ? (
                         <p className="text-sm text-muted-foreground">No automation history available</p>
                       ) : (
-                        <div className="space-y-1.5">
+                        <div className="space-y-1.5 max-h-[220px] overflow-y-auto pr-1">
                           {action1Data.automationHistory.map((run, i) => {
                             const status = (run.status ?? run.result ?? "").toLowerCase();
                             const isError = status === "error" || status === "failed";
