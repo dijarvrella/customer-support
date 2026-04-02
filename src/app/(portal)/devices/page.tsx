@@ -24,6 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Monitor,
   Loader2,
@@ -34,7 +35,38 @@ import {
   Laptop,
   Apple,
   Smartphone,
+  AlertTriangle,
+  RefreshCw,
 } from "lucide-react";
+
+// --- Action1 types ---
+
+interface Action1Endpoint {
+  id: string;
+  name: string;
+  status?: string;
+  user_name?: string;
+  os_name?: string;
+  os_version?: string;
+  last_seen?: string;
+  reboot_required?: boolean;
+  endpoint_groups?: string[];
+  [key: string]: unknown;
+}
+
+interface Action1PolicyRun {
+  id?: string;
+  name?: string;
+  policy_name?: string;
+  status?: string;
+  result?: string;
+  progress?: number;
+  started_at?: string;
+  finished_at?: string;
+  started?: string;
+  finished?: string;
+  [key: string]: unknown;
+}
 
 interface ManagedDevice {
   id: string;
@@ -149,6 +181,29 @@ function formatOwnerType(type: string | null | undefined): string {
   }
 }
 
+function Action1StatusBadge({ status }: { status?: string }) {
+  const s = status?.toLowerCase() ?? "";
+  if (s === "online" || s === "connected") {
+    return (
+      <Badge className="bg-green-100 text-green-800 border-green-200 hover:bg-green-100">
+        Connected
+      </Badge>
+    );
+  }
+  if (s === "offline" || s === "disconnected") {
+    return (
+      <Badge className="bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-100">
+        Disconnected
+      </Badge>
+    );
+  }
+  return (
+    <Badge className="bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-100">
+      {status || "Unknown"}
+    </Badge>
+  );
+}
+
 function OsIcon({ os }: { os: string }) {
   const osLower = os?.toLowerCase() || "";
   if (osLower.includes("windows")) return <Laptop className="h-4 w-4 text-blue-600" />;
@@ -171,9 +226,33 @@ export default function DevicesPage() {
   const [complianceFilter, setComplianceFilter] = useState("all");
 
   // Device detail dialog
-  const [selectedDevice, setSelectedDevice] = useState<ManagedDevice | null>(
-    null
-  );
+  const [selectedDevice, setSelectedDevice] = useState<ManagedDevice | null>(null);
+
+  // Action1 data for selected device
+  const [action1Data, setAction1Data] = useState<{
+    endpoint: Action1Endpoint | null;
+    automationHistory: Action1PolicyRun[];
+  } | null>(null);
+  const [action1Loading, setAction1Loading] = useState(false);
+  const [action1Error, setAction1Error] = useState<string | null>(null);
+
+  async function fetchAction1Data(deviceName: string) {
+    setAction1Loading(true);
+    setAction1Error(null);
+    setAction1Data(null);
+    try {
+      const res = await fetch(
+        `/api/action1/endpoint?deviceName=${encodeURIComponent(deviceName)}`
+      );
+      if (!res.ok) throw new Error("Failed to fetch Action1 data");
+      const data = await res.json();
+      setAction1Data(data);
+    } catch {
+      setAction1Error("Could not load Action1 data");
+    } finally {
+      setAction1Loading(false);
+    }
+  }
 
   // Get current user role
   useEffect(() => {
@@ -525,7 +604,10 @@ export default function DevicesPage() {
                 filteredDevices.map((device) => (
                   <tr
                     key={device.id}
-                    onClick={() => setSelectedDevice(device)}
+                    onClick={() => {
+                      setSelectedDevice(device);
+                      fetchAction1Data(device.deviceName);
+                    }}
                     className="border-b last:border-0 hover:bg-accent/30 cursor-pointer transition-colors"
                   >
                     <td className="px-4 py-3">
@@ -573,125 +655,238 @@ export default function DevicesPage() {
       <Dialog
         open={!!selectedDevice}
         onOpenChange={(open) => {
-          if (!open) setSelectedDevice(null);
+          if (!open) {
+            setSelectedDevice(null);
+            setAction1Data(null);
+            setAction1Error(null);
+          }
         }}
       >
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <OsIcon os={selectedDevice?.operatingSystem || ""} />
               {selectedDevice?.deviceName || "Device Details"}
             </DialogTitle>
             <DialogDescription>
-              Intune managed device information
+              Device information from Intune and Action1
             </DialogDescription>
           </DialogHeader>
 
           {selectedDevice && (
-            <div className="space-y-4">
-              {/* Device Info */}
-              <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-                  Device
-                </h3>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-                  <div>
-                    <p className="text-muted-foreground">Name</p>
-                    <p className="font-medium">
-                      {selectedDevice.deviceName || "-"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Operating System</p>
-                    <p className="font-medium">
-                      {getFriendlyOsVersion(selectedDevice.operatingSystem, selectedDevice.osVersion)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Build Version</p>
-                    <p className="font-medium font-mono text-sm">
-                      {selectedDevice.osVersion || "-"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Model</p>
-                    <p className="font-medium">
-                      {selectedDevice.model || "-"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Manufacturer</p>
-                    <p className="font-medium">
-                      {selectedDevice.manufacturer || "-"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Serial Number</p>
-                    <p className="font-medium font-mono text-xs">
-                      {selectedDevice.serialNumber || "-"}
-                    </p>
-                  </div>
-                </div>
-              </div>
+            <Tabs defaultValue="intune">
+              <TabsList className="mb-4">
+                <TabsTrigger value="intune">Intune</TabsTrigger>
+                <TabsTrigger value="action1">Action1</TabsTrigger>
+              </TabsList>
 
-              {/* User Info */}
-              <div className="space-y-3 border-t pt-4">
-                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-                  User
-                </h3>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-                  <div>
-                    <p className="text-muted-foreground">Display Name</p>
-                    <p className="font-medium">
-                      {selectedDevice.userDisplayName || "-"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Email</p>
-                    <p className="font-medium">
-                      {selectedDevice.userPrincipalName || "-"}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Status Info */}
-              <div className="space-y-3 border-t pt-4">
-                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-                  Status
-                </h3>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-                  <div>
-                    <p className="text-muted-foreground">Compliance</p>
-                    <div className="mt-1">
-                      <ComplianceBadge
-                        state={selectedDevice.complianceState}
-                      />
+              {/* ── Intune tab ── */}
+              <TabsContent value="intune">
+                <div className="space-y-4">
+                  <div className="space-y-3">
+                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+                      Device
+                    </h3>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                      <div>
+                        <p className="text-muted-foreground">Name</p>
+                        <p className="font-medium">{selectedDevice.deviceName || "-"}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Operating System</p>
+                        <p className="font-medium">
+                          {getFriendlyOsVersion(selectedDevice.operatingSystem, selectedDevice.osVersion)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Build Version</p>
+                        <p className="font-medium font-mono text-sm">{selectedDevice.osVersion || "-"}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Model</p>
+                        <p className="font-medium">{selectedDevice.model || "-"}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Manufacturer</p>
+                        <p className="font-medium">{selectedDevice.manufacturer || "-"}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Serial Number</p>
+                        <p className="font-medium font-mono text-xs">{selectedDevice.serialNumber || "-"}</p>
+                      </div>
                     </div>
                   </div>
-                  <div>
-                    <p className="text-muted-foreground">Owner Type</p>
-                    <p className="font-medium">
-                      {formatOwnerType(
-                        selectedDevice.managedDeviceOwnerType
-                      )}
-                    </p>
+
+                  <div className="space-y-3 border-t pt-4">
+                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+                      User
+                    </h3>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                      <div>
+                        <p className="text-muted-foreground">Display Name</p>
+                        <p className="font-medium">{selectedDevice.userDisplayName || "-"}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Email</p>
+                        <p className="font-medium">{selectedDevice.userPrincipalName || "-"}</p>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-muted-foreground">Enrolled</p>
-                    <p className="font-medium">
-                      {formatDate(selectedDevice.enrolledDateTime)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Last Sync</p>
-                    <p className="font-medium">
-                      {formatDate(selectedDevice.lastSyncDateTime)}
-                    </p>
+
+                  <div className="space-y-3 border-t pt-4">
+                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+                      Status
+                    </h3>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                      <div>
+                        <p className="text-muted-foreground">Compliance</p>
+                        <div className="mt-1">
+                          <ComplianceBadge state={selectedDevice.complianceState} />
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Owner Type</p>
+                        <p className="font-medium">{formatOwnerType(selectedDevice.managedDeviceOwnerType)}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Enrolled</p>
+                        <p className="font-medium">{formatDate(selectedDevice.enrolledDateTime)}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Last Sync</p>
+                        <p className="font-medium">{formatDate(selectedDevice.lastSyncDateTime)}</p>
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
-            </div>
+              </TabsContent>
+
+              {/* ── Action1 tab ── */}
+              <TabsContent value="action1">
+                {action1Loading ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                ) : action1Error ? (
+                  <div className="text-center py-10 space-y-2">
+                    <XCircle className="h-8 w-8 mx-auto text-red-400" />
+                    <p className="text-sm text-muted-foreground">{action1Error}</p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => fetchAction1Data(selectedDevice.deviceName)}
+                    >
+                      <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                      Retry
+                    </Button>
+                  </div>
+                ) : !action1Data?.endpoint ? (
+                  <div className="text-center py-10">
+                    <Monitor className="h-8 w-8 mx-auto mb-2 text-muted-foreground opacity-40" />
+                    <p className="text-sm text-muted-foreground">
+                      Device not found in Action1
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-5">
+                    {/* Endpoint general info */}
+                    <div className="space-y-3">
+                      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+                        Endpoint
+                      </h3>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                        <div>
+                          <p className="text-muted-foreground">Status</p>
+                          <div className="mt-0.5">
+                            <Action1StatusBadge status={action1Data.endpoint.status} />
+                          </div>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground">Reboot Required</p>
+                          <p className="font-medium">
+                            {action1Data.endpoint.reboot_required ? (
+                              <span className="text-orange-600 font-medium">Yes</span>
+                            ) : (
+                              <span className="text-green-600">No</span>
+                            )}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground">User</p>
+                          <p className="font-medium">{action1Data.endpoint.user_name || "-"}</p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground">OS</p>
+                          <p className="font-medium">{action1Data.endpoint.os_name || "-"}</p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground">Last Seen</p>
+                          <p className="font-medium">{formatDate(action1Data.endpoint.last_seen) || "-"}</p>
+                        </div>
+                        {action1Data.endpoint.endpoint_groups?.length ? (
+                          <div>
+                            <p className="text-muted-foreground">Groups</p>
+                            <p className="font-medium">{action1Data.endpoint.endpoint_groups.join(", ")}</p>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    {/* Automation history */}
+                    <div className="space-y-3 border-t pt-4">
+                      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                        Automation History
+                        {action1Data.automationHistory.some(
+                          (r) => (r.status ?? r.result)?.toLowerCase() === "error" ||
+                                 (r.status ?? r.result)?.toLowerCase() === "failed"
+                        ) && (
+                          <AlertTriangle className="h-4 w-4 text-red-500" />
+                        )}
+                      </h3>
+
+                      {action1Data.automationHistory.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No automation history available</p>
+                      ) : (
+                        <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                          {action1Data.automationHistory.map((run, i) => {
+                            const status = (run.status ?? run.result ?? "").toLowerCase();
+                            const isError = status === "error" || status === "failed";
+                            const name = run.name ?? run.policy_name ?? `Run #${i + 1}`;
+                            const started = run.started_at ?? run.started;
+                            const finished = run.finished_at ?? run.finished;
+                            return (
+                              <div
+                                key={run.id ?? i}
+                                className={`flex items-start justify-between gap-3 rounded-md px-3 py-2 text-xs border ${
+                                  isError
+                                    ? "border-red-200 bg-red-50 dark:bg-red-950/20 dark:border-red-800"
+                                    : "border-border bg-muted/30"
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  {isError ? (
+                                    <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0" />
+                                  ) : (
+                                    <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                                  )}
+                                  <span className="truncate font-medium">{name}</span>
+                                </div>
+                                <div className="text-right shrink-0 text-muted-foreground space-y-0.5">
+                                  {started && <p>{formatDate(started)}</p>}
+                                  {finished && started !== finished && (
+                                    <p>→ {formatDate(finished)}</p>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
           )}
         </DialogContent>
       </Dialog>

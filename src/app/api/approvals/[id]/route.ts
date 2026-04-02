@@ -14,7 +14,7 @@ import { sendApprovalDecisionEmail } from "@/lib/notifications/email";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-export async function POST(request: NextRequest, context: RouteContext) {
+async function handleDecision(request: NextRequest, context: RouteContext) {
   try {
     const session = await auth();
     if (!session?.user?.id) {
@@ -157,10 +157,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
       ticketStatusChanged: newTicketStatus,
     });
   } catch (error) {
-    console.error("POST /api/approvals/[id] error:", error);
+    console.error("POST/PATCH /api/approvals/[id] error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
     );
   }
 }
+
+// Both POST (ticket detail page) and PATCH (approvals page) use the same handler
+export const POST = handleDecision;
+export const PATCH = handleDecision;

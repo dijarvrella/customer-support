@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
@@ -57,6 +57,7 @@ interface BoardColumn {
   label: string;
   statuses: TicketStatus[];
   borderColor: string;
+  dropStatus: TicketStatus;
 }
 
 const BOARD_COLUMNS: BoardColumn[] = [
@@ -65,30 +66,35 @@ const BOARD_COLUMNS: BoardColumn[] = [
     label: "New",
     statuses: ["new", "triaged"],
     borderColor: "border-blue-500",
+    dropStatus: "new",
   },
   {
     key: "in_progress",
     label: "In Progress",
     statuses: ["in_progress"],
     borderColor: "border-purple-500",
+    dropStatus: "in_progress",
   },
   {
     key: "blocked",
     label: "Blocked",
     statuses: ["pending_approval", "pending_info", "pending_vendor"],
     borderColor: "border-amber-500",
+    dropStatus: "pending_info",
   },
   {
     key: "resolved",
     label: "Resolved",
     statuses: ["resolved"],
     borderColor: "border-emerald-500",
+    dropStatus: "resolved",
   },
   {
     key: "closed",
     label: "Closed",
     statuses: ["closed", "cancelled"],
     borderColor: "border-gray-400",
+    dropStatus: "closed",
   },
 ];
 
@@ -112,6 +118,10 @@ export default function BoardPage() {
     new Set()
   );
   const [showPriorityMenu, setShowPriorityMenu] = useState(false);
+
+  // Drag-and-drop state
+  const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
+  const draggingTicketRef = useRef<{ id: string; originalStatus: string } | null>(null);
 
   // Fetch tickets
   useEffect(() => {
@@ -191,6 +201,62 @@ export default function BoardPage() {
       }
       return next;
     });
+  }
+
+  // --- Drag-and-drop handlers ---
+
+  function handleDragStart(ticketId: string, currentStatus: string) {
+    draggingTicketRef.current = { id: ticketId, originalStatus: currentStatus };
+  }
+
+  function handleDragEnd() {
+    draggingTicketRef.current = null;
+    setDragOverColumn(null);
+  }
+
+  async function handleDrop(column: BoardColumn) {
+    const dragging = draggingTicketRef.current;
+    if (!dragging) return;
+    setDragOverColumn(null);
+
+    // No-op if dropped in the same column
+    if (column.statuses.includes(dragging.originalStatus as TicketStatus)) {
+      return;
+    }
+
+    const targetStatus = column.dropStatus;
+
+    // Optimistic update
+    setTickets((prev) =>
+      prev.map((t) =>
+        t.id === dragging.id ? { ...t, status: targetStatus } : t
+      )
+    );
+
+    try {
+      const res = await fetch(`/api/tickets/${dragging.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: targetStatus }),
+      });
+      if (!res.ok) {
+        // Revert on failure
+        setTickets((prev) =>
+          prev.map((t) =>
+            t.id === dragging.id ? { ...t, status: dragging.originalStatus } : t
+          )
+        );
+      }
+    } catch {
+      // Revert on error
+      setTickets((prev) =>
+        prev.map((t) =>
+          t.id === dragging.id ? { ...t, status: dragging.originalStatus } : t
+        )
+      );
+    }
+
+    draggingTicketRef.current = null;
   }
 
   return (
@@ -294,6 +360,7 @@ export default function BoardPage() {
                   <>
                     <Separator className="my-1" />
                     <button
+                      type="button"
                       onClick={() => setPriorityFilters(new Set())}
                       className="w-full text-left px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent rounded-md"
                     >
@@ -315,6 +382,7 @@ export default function BoardPage() {
           <div className="flex gap-4 pb-4 min-w-max">
             {BOARD_COLUMNS.map((column) => {
               const items = columnTickets[column.key] || [];
+              const isOver = dragOverColumn === column.key;
               return (
                 <div
                   key={column.key}
@@ -333,11 +401,32 @@ export default function BoardPage() {
                     </Badge>
                   </div>
 
-                  {/* Column body */}
-                  <div className="flex-1 space-y-2 bg-muted/20 rounded-b-lg p-2 min-h-[200px]">
+                  {/* Column body — drop zone */}
+                  <div
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setDragOverColumn(column.key);
+                    }}
+                    onDragLeave={(e) => {
+                      // Only clear if leaving the column entirely (not entering a child)
+                      if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                        setDragOverColumn(null);
+                      }
+                    }}
+                    onDrop={() => handleDrop(column)}
+                    className={cn(
+                      "flex-1 space-y-2 rounded-b-lg p-2 min-h-[200px] transition-colors",
+                      isOver
+                        ? "bg-muted/60 ring-2 ring-inset ring-primary/40"
+                        : "bg-muted/20"
+                    )}
+                  >
                     {items.length === 0 ? (
-                      <p className="text-xs text-muted-foreground text-center py-8">
-                        No tickets
+                      <p className={cn(
+                        "text-xs text-muted-foreground text-center py-8",
+                        isOver && "text-primary"
+                      )}>
+                        {isOver ? "Drop here" : "No tickets"}
                       </p>
                     ) : (
                       items.map((ticket) => (
@@ -345,6 +434,8 @@ export default function BoardPage() {
                           key={ticket.id}
                           ticket={ticket}
                           onClick={() => router.push(`/tickets/${ticket.id}`)}
+                          onDragStart={() => handleDragStart(ticket.id, ticket.status)}
+                          onDragEnd={handleDragEnd}
                         />
                       ))
                     )}
@@ -365,18 +456,28 @@ export default function BoardPage() {
 function TicketCard({
   ticket,
   onClick,
+  onDragStart,
+  onDragEnd,
 }: {
   ticket: TicketRow;
   onClick: () => void;
+  onDragStart: () => void;
+  onDragEnd: () => void;
 }) {
   const priorityBorder =
     PRIORITY_BORDER_COLORS[ticket.priority] || "border-l-gray-300";
 
   return (
     <Card
+      draggable
+      onDragStart={(e) => {
+        e.stopPropagation();
+        onDragStart();
+      }}
+      onDragEnd={onDragEnd}
       onClick={onClick}
       className={cn(
-        "border-l-4 cursor-pointer transition-all hover:shadow-md hover:bg-accent/30",
+        "border-l-4 cursor-grab active:cursor-grabbing transition-all hover:shadow-md hover:bg-accent/30 active:opacity-60",
         priorityBorder
       )}
     >
