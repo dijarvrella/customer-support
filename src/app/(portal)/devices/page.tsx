@@ -68,6 +68,26 @@ interface Action1PolicyRun {
   [key: string]: unknown;
 }
 
+interface Action1MissingUpdate {
+  id?: string;
+  name?: string;
+  platform?: string;
+  status?: string;
+}
+
+interface Action1Vulnerability {
+  cve_id?: string;
+  cvss_score?: string;
+  remediation_status?: string;
+  remediation_deadline?: string;
+  software_name?: string;
+  cisa_kev?: string;
+}
+
+interface Action1InstalledSoftware {
+  name: string;
+}
+
 interface ManagedDevice {
   id: string;
   deviceName: string;
@@ -232,6 +252,9 @@ export default function DevicesPage() {
   const [action1Data, setAction1Data] = useState<{
     endpoint: Action1Endpoint | null;
     automationHistory: Action1PolicyRun[];
+    missingUpdates: Action1MissingUpdate[];
+    vulnerabilities: Action1Vulnerability[];
+    installedSoftware: Action1InstalledSoftware[];
   } | null>(null);
   const [action1Loading, setAction1Loading] = useState(false);
   const [action1Error, setAction1Error] = useState<string | null>(null);
@@ -830,6 +853,89 @@ export default function DevicesPage() {
                           </div>
                         ) : null}
                       </div>
+                    </div>
+
+                    {/* Missing Updates */}
+                    <div className="space-y-3 border-t pt-4">
+                      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                        Missing Updates
+                        {action1Data.missingUpdates.length > 0 && (
+                          <span className="inline-flex items-center justify-center rounded-full bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 text-xs font-semibold px-2 py-0.5 min-w-[1.25rem]">
+                            {action1Data.missingUpdates.length}
+                          </span>
+                        )}
+                      </h3>
+                      {action1Data.missingUpdates.length === 0 ? (
+                        <p className="text-sm text-green-600 dark:text-green-400">Up to date</p>
+                      ) : (
+                        <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
+                          {action1Data.missingUpdates.map((u, i) => (
+                            <div key={u.id ?? i} className="flex items-center gap-2 text-xs rounded-md px-3 py-1.5 border border-orange-200 bg-orange-50 dark:bg-orange-950/20 dark:border-orange-800">
+                              <AlertTriangle className="h-3.5 w-3.5 text-orange-500 shrink-0" />
+                              <span className="truncate">{u.name}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Vulnerabilities */}
+                    <div className="space-y-3 border-t pt-4">
+                      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                        Vulnerabilities
+                        {action1Data.vulnerabilities.length > 0 && (
+                          <span className="inline-flex items-center justify-center rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 text-xs font-semibold px-2 py-0.5 min-w-[1.25rem]">
+                            {action1Data.vulnerabilities.length}
+                          </span>
+                        )}
+                      </h3>
+                      {action1Data.vulnerabilities.length === 0 ? (
+                        <p className="text-sm text-green-600 dark:text-green-400">No vulnerabilities found</p>
+                      ) : (
+                        <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                          {action1Data.vulnerabilities.map((v, i) => {
+                            const score = parseFloat(v.cvss_score ?? "0");
+                            const severity = score >= 9 ? "Critical" : score >= 7 ? "High" : score >= 4 ? "Medium" : "Low";
+                            const severityColor =
+                              severity === "Critical" ? "text-red-700 bg-red-100 dark:bg-red-900/30 dark:text-red-400" :
+                              severity === "High" ? "text-orange-700 bg-orange-100 dark:bg-orange-900/30 dark:text-orange-400" :
+                              severity === "Medium" ? "text-yellow-700 bg-yellow-100 dark:bg-yellow-900/30 dark:text-yellow-400" :
+                              "text-blue-700 bg-blue-100 dark:bg-blue-900/30 dark:text-blue-400";
+                            const isOverdue = v.remediation_status?.toLowerCase() === "overdue";
+                            return (
+                              <div key={v.cve_id ?? i} className={`rounded-md px-3 py-2 text-xs border ${isOverdue ? "border-red-200 bg-red-50 dark:bg-red-950/20 dark:border-red-800" : "border-border bg-muted/30"}`}>
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-mono font-semibold">{v.cve_id}</span>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${severityColor}`}>{severity} {v.cvss_score}</span>
+                                    {isOverdue && <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-red-700 bg-red-100 dark:bg-red-900/30 dark:text-red-400">Overdue</span>}
+                                  </div>
+                                </div>
+                                {v.software_name && <p className="text-muted-foreground mt-0.5 truncate">{v.software_name}</p>}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Installed Software */}
+                    <div className="space-y-3 border-t pt-4">
+                      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                        Installed Software
+                        {action1Data.installedSoftware.length > 0 && (
+                          <span className="text-xs text-muted-foreground font-normal">({action1Data.installedSoftware.length})</span>
+                        )}
+                      </h3>
+                      {action1Data.installedSoftware.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No data available</p>
+                      ) : (
+                        <div className="max-h-40 overflow-y-auto pr-1 space-y-0.5">
+                          {action1Data.installedSoftware.map((s, i) => (
+                            <div key={i} className="text-xs px-3 py-1 rounded bg-muted/40 truncate">{s.name}</div>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     {/* Automation history */}
