@@ -23,6 +23,13 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   GitBranch,
   Shield,
   UserCheck,
@@ -465,25 +472,26 @@ export default function WorkflowsClient({
               </div>
               <div className="space-y-2">
                 <Label htmlFor="wf-ui-cat">Table group</Label>
-                <select
-                  id="wf-ui-cat"
-                  title="Table group"
-                  aria-label="Table group"
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                <Select
                   value={draft.uiCategory}
-                  onChange={(e) =>
+                  onValueChange={(v) =>
                     setDraft({
                       ...draft,
-                      uiCategory: e.target.value as WorkflowUiCategory,
+                      uiCategory: v as WorkflowUiCategory,
                     })
                   }
                 >
-                  {UI_CATEGORY_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger id="wf-ui-cat" className="w-full">
+                    <SelectValue placeholder="Choose group" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {UI_CATEGORY_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="flex items-center justify-between gap-4 rounded-lg border p-3">
                 <div className="space-y-0.5">

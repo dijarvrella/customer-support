@@ -121,12 +121,6 @@ export async function PUT(req: NextRequest) {
   const notes =
     typeof b.notes === "string" ? b.notes.trim().slice(0, 2000) : "";
 
-  const [existing] = await db
-    .select({ id: workflowApprovalConfigs.id })
-    .from(workflowApprovalConfigs)
-    .where(eq(workflowApprovalConfigs.categorySlug, categorySlug))
-    .limit(1);
-
   const payload = {
     categorySlug,
     requestTypeLabel,
@@ -138,15 +132,36 @@ export async function PUT(req: NextRequest) {
     updatedAt: new Date(),
   };
 
-  if (existing) {
-    await db
-      .update(workflowApprovalConfigs)
-      .set(payload)
-      .where(eq(workflowApprovalConfigs.id, existing.id));
-  } else {
-    await db.insert(workflowApprovalConfigs).values(payload);
-  }
+  try {
+    const [existing] = await db
+      .select({ id: workflowApprovalConfigs.id })
+      .from(workflowApprovalConfigs)
+      .where(eq(workflowApprovalConfigs.categorySlug, categorySlug))
+      .limit(1);
 
-  const rows = await getMergedWorkflowApprovalConfigs();
-  return NextResponse.json({ ok: true, rows });
+    if (existing) {
+      await db
+        .update(workflowApprovalConfigs)
+        .set(payload)
+        .where(eq(workflowApprovalConfigs.id, existing.id));
+    } else {
+      await db.insert(workflowApprovalConfigs).values(payload);
+    }
+
+    const rows = await getMergedWorkflowApprovalConfigs();
+    return NextResponse.json({ ok: true, rows });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const missingTable =
+      /does not exist|relation|workflow_approval_configs/i.test(msg);
+    console.error("[workflow] PUT approval-config:", e);
+    return NextResponse.json(
+      {
+        error: missingTable
+          ? "Workflow settings need the database table workflow_approval_configs. From the repo run: npm run db:push (with DATABASE_URL set to this environment), then redeploy or try again."
+          : "Failed to save workflow settings.",
+      },
+      { status: missingTable ? 503 : 500 }
+    );
+  }
 }

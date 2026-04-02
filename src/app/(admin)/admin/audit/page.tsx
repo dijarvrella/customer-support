@@ -30,7 +30,8 @@ interface AuditEntry {
   entityType: string;
   entityId: string | null;
   actorId: string | null;
-  actorEmail: string | null;
+  actorType: string | null;
+  actor: { name: string | null; email: string | null } | null;
   details: Record<string, unknown> | null;
   ipAddress: string | null;
   createdAt: string;
@@ -75,6 +76,7 @@ export default function AuditLogPage() {
   const [eventType, setEventType] = useState(searchParams.get("eventType") || "");
   const [entityType, setEntityType] = useState(searchParams.get("entityType") || "all");
   const [entityId, setEntityId] = useState(searchParams.get("entityId") || "");
+  const [actorType, setActorType] = useState(searchParams.get("actorType") || "user");
   const [dateFrom, setDateFrom] = useState(searchParams.get("dateFrom") || "");
   const [dateTo, setDateTo] = useState(searchParams.get("dateTo") || "");
   const [page, setPage] = useState(Number(searchParams.get("page")) || 1);
@@ -89,6 +91,7 @@ export default function AuditLogPage() {
       if (eventType) params.set("eventType", eventType);
       if (entityType && entityType !== "all") params.set("entityType", entityType);
       if (entityId) params.set("entityId", entityId);
+      if (actorType && actorType !== "all") params.set("actorType", actorType);
       if (dateFrom) params.set("dateFrom", dateFrom);
       if (dateTo) params.set("dateTo", dateTo);
 
@@ -105,7 +108,7 @@ export default function AuditLogPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, eventType, entityType, entityId, dateFrom, dateTo]);
+  }, [page, eventType, entityType, entityId, actorType, dateFrom, dateTo]);
 
   useEffect(() => {
     fetchAuditLogs();
@@ -117,11 +120,12 @@ export default function AuditLogPage() {
     if (eventType) params.set("eventType", eventType);
     if (entityType && entityType !== "all") params.set("entityType", entityType);
     if (entityId) params.set("entityId", entityId);
+    if (actorType && actorType !== "all") params.set("actorType", actorType);
     if (dateFrom) params.set("dateFrom", dateFrom);
     if (dateTo) params.set("dateTo", dateTo);
     const qs = params.toString();
     router.replace(`/admin/audit${qs ? `?${qs}` : ""}`, { scroll: false });
-  }, [page, eventType, entityType, entityId, dateFrom, dateTo, router]);
+  }, [page, eventType, entityType, entityId, actorType, dateFrom, dateTo, router]);
 
   const totalPages = Math.ceil(total / pageSize);
 
@@ -133,6 +137,7 @@ export default function AuditLogPage() {
     setEventType("");
     setEntityType("all");
     setEntityId("");
+    setActorType("user");
     setDateFrom("");
     setDateTo("");
     setPage(1);
@@ -175,6 +180,23 @@ export default function AuditLogPage() {
                   <SelectItem value="user">User</SelectItem>
                   <SelectItem value="workflow">Workflow</SelectItem>
                   <SelectItem value="config">Config</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">
+                Actor Type
+              </label>
+              <Select value={actorType} onValueChange={setActorType}>
+                <SelectTrigger className="w-40">
+                  <SelectValue placeholder="All" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="user">User</SelectItem>
+                  <SelectItem value="automation">Automation</SelectItem>
+                  <SelectItem value="system">System</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -274,7 +296,7 @@ export default function AuditLogPage() {
                           )}
                         </TableCell>
                         <TableCell className="text-sm">
-                          {entry.actorEmail || entry.actorId || "-"}
+                          {entry.actor?.name || entry.actor?.email || (entry.actorType === "automation" ? "Automation" : entry.actorType === "system" ? "System" : entry.actorId ? entry.actorId.slice(0, 8) : "-")}
                         </TableCell>
                         <TableCell className="hidden lg:table-cell text-xs font-mono text-muted-foreground max-w-[250px] truncate">
                           {truncateJson(entry.details)}

@@ -24,6 +24,7 @@ export async function GET(request: NextRequest) {
     const entityId = searchParams.get("entityId");
     const eventType = searchParams.get("eventType");
     const actorId = searchParams.get("actorId");
+    const actorType = searchParams.get("actorType");
     const from = searchParams.get("from");
     const to = searchParams.get("to");
     const limit = Math.min(
@@ -45,6 +46,9 @@ export async function GET(request: NextRequest) {
     }
     if (actorId) {
       conditions.push(eq(auditLog.actorId, actorId));
+    }
+    if (actorType) {
+      conditions.push(eq(auditLog.actorType, actorType));
     }
     if (from) {
       conditions.push(gte(auditLog.createdAt, new Date(from)));
