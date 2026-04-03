@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { tickets, users } from "@/lib/db/schema";
-import { eq, like, and } from "drizzle-orm";
+import { eq, like, or } from "drizzle-orm";
 import { generateTicketNumber } from "@/lib/utils";
 import { DEFAULT_SLA, type TicketPriority } from "@/lib/constants";
 import { defaultQueueIdForCategorySlug } from "@/lib/tickets/devops-queue";
@@ -121,20 +121,29 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ created: 0, message: "No failed automations" });
     }
 
-    // ── 3. Find an it_admin user to use as ticket requester ───────────────────
-    const adminUser = await db
-      .select({ id: users.id })
+    // ── 3. Resolve the system requester ──────────────────────────────────────
+    // Prefer the Zimark Admin system account, fall back to dijar.v@zimark.io
+    const systemUser = await db
+      .select({ id: users.id, email: users.email })
       .from(users)
-      .where(eq(users.role, "it_admin"))
-      .limit(1);
+      .where(
+        or(
+          eq(users.email, "admin@zimark.io"),
+          eq(users.email, "dijar.v@zimark.io")
+        )
+      )
+      .limit(2);
 
-    if (!adminUser.length) {
+    if (!systemUser.length) {
       return NextResponse.json(
-        { error: "No it_admin user found to create tickets" },
+        { error: "No system user found to create tickets" },
         { status: 500 }
       );
     }
-    const systemRequesterId = adminUser[0].id;
+    // Prefer admin@zimark.io over the fallback
+    const systemRequesterId =
+      systemUser.find((u) => u.email === "admin@zimark.io")?.id ??
+      systemUser[0].id;
 
     const CONSOLE_BASE = "https://app.eu.action1.com/console";
 
