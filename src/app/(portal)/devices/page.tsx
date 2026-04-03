@@ -255,6 +255,7 @@ export default function DevicesPage() {
     missingUpdates: Action1MissingUpdate[];
     vulnerabilities: Action1Vulnerability[];
     installedSoftware: Action1InstalledSoftware[];
+    orgId?: string;
   } | null>(null);
   const [action1Loading, setAction1Loading] = useState(false);
   const [action1Error, setAction1Error] = useState<string | null>(null);
@@ -814,8 +815,19 @@ export default function DevicesPage() {
                   <div className="space-y-5">
                     {/* Endpoint general info */}
                     <div className="space-y-2">
-                      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+                      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
                         Endpoint
+                        {action1Data.orgId && action1Data.endpoint.id && (
+                          <a
+                            href={`https://app.eu.action1.com/console/endpoints?org=${action1Data.orgId}&endpoint=${action1Data.endpoint.id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="ml-auto text-[10px] font-normal text-muted-foreground hover:text-foreground underline underline-offset-2"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            Open in Action1 ↗
+                          </a>
+                        )}
                       </h3>
                       <div className="text-sm space-y-1.5">
                         {[
@@ -931,6 +943,17 @@ export default function DevicesPage() {
                         ) && (
                           <AlertTriangle className="h-4 w-4 text-red-500" />
                         )}
+                        {action1Data.orgId && (
+                          <a
+                            href={`https://app.eu.action1.com/console/automations?org=${action1Data.orgId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="ml-auto text-[10px] font-normal text-muted-foreground hover:text-foreground underline underline-offset-2"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            Open in Action1 ↗
+                          </a>
+                        )}
                       </h3>
 
                       {action1Data.automationHistory.length === 0 ? (
@@ -958,7 +981,19 @@ export default function DevicesPage() {
                                   ) : (
                                     <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
                                   )}
-                                  <span className="truncate font-medium">{name}</span>
+                                  {action1Data.orgId ? (
+                                    <a
+                                      href={`https://app.eu.action1.com/console/automations?org=${action1Data.orgId}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="truncate font-medium hover:underline"
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      {name}
+                                    </a>
+                                  ) : (
+                                    <span className="truncate font-medium">{name}</span>
+                                  )}
                                 </div>
                                 <div className="text-right shrink-0 text-muted-foreground space-y-0.5">
                                   {started && <p>{formatDate(started)}</p>}

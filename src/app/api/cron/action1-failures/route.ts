@@ -136,17 +136,19 @@ export async function GET(request: NextRequest) {
     }
     const systemRequesterId = adminUser[0].id;
 
+    const CONSOLE_BASE = "https://app.eu.action1.com/console";
+
     // ── 4. Deduplicate — check which instance IDs already have tickets ────────
     const now = new Date();
     let created = 0;
 
     for (const instance of failedInstances) {
-      const tag = `action1-failure:${instance.id}`;
+      const dedupTag = `action1-failure:${instance.id}`;
 
       const existing = await db
         .select({ id: tickets.id })
         .from(tickets)
-        .where(like(tickets.tags, `%${tag}%`))
+        .where(like(tickets.tags, `%${dedupTag}%`))
         .limit(1);
 
       if (existing.length > 0) continue; // already ticketed
@@ -159,16 +161,27 @@ export async function GET(request: NextRequest) {
       const startedAt = normalizeDate(instance.start_time);
       const endedAt = normalizeDate(instance.end_time);
 
+      // Action1 console deep-links
+      const automationsUrl = `${CONSOLE_BASE}/automations?org=${orgId}`;
+      const endpointUrls = deviceIds
+        .map((id) => {
+          const name = endpointMap.get(id) ?? id;
+          return `[${name}](${CONSOLE_BASE}/endpoints?org=${orgId}&endpoint=${id})`;
+        })
+        .join(", ");
+
       const title = `[Action1] Automation failed: ${instance.name ?? instance.id}${deviceNames ? ` on ${deviceNames}` : ""}`;
       const description = [
-        `**Automation:** ${instance.name ?? instance.id}`,
+        `**Automation:** [${instance.name ?? instance.id}](${automationsUrl})`,
         `**Status:** ${instance.status}`,
-        deviceNames ? `**Device(s):** ${deviceNames}` : null,
+        deviceNames ? `**Device(s):** ${endpointUrls || deviceNames}` : null,
         startedAt ? `**Started:** ${new Date(startedAt).toLocaleString()}` : null,
         endedAt ? `**Ended:** ${new Date(endedAt).toLocaleString()}` : null,
         `**Action1 Instance ID:** \`${instance.id}\``,
+        ``,
+        `[→ Open Action1 Dashboard](${automationsUrl})`,
       ]
-        .filter(Boolean)
+        .filter((l) => l !== null)
         .join("\n");
 
       const priority: TicketPriority = "high";
@@ -179,6 +192,9 @@ export async function GET(request: NextRequest) {
       const ticketNumber = generateTicketNumber();
       const queueId = await defaultQueueIdForCategorySlug("hardware");
 
+      // tags: visible "action1" label + dedup tag (comma-separated)
+      const tags = `action1,${dedupTag}`;
+
       await db.insert(tickets).values({
         ticketNumber,
         title,
@@ -187,7 +203,7 @@ export async function GET(request: NextRequest) {
         categorySlug: "hardware",
         requesterId: systemRequesterId,
         source: "system",
-        tags: tag,
+        tags,
         slaResponseDue,
         slaResolutionDue,
         queueId,

@@ -47,6 +47,7 @@ import {
   ChevronRight,
   Loader2,
   ShieldCheck,
+  Bot,
   X,
   UserPlus,
 } from "lucide-react";
@@ -73,6 +74,11 @@ interface TicketResponse {
 function hasIsoTag(tags: string | null | undefined): boolean {
   if (!tags) return false;
   return tags.toLowerCase().includes("iso");
+}
+
+function hasAction1Tag(tags: string | null | undefined): boolean {
+  if (!tags) return false;
+  return tags.toLowerCase().includes("action1");
 }
 
 export default function TicketsPage() {
@@ -578,6 +584,15 @@ export default function TicketsPage() {
                             >
                               <ShieldCheck className="h-3 w-3 mr-0.5" />
                               ISO
+                            </Badge>
+                          )}
+                          {hasAction1Tag(ticket.tags) && (
+                            <Badge
+                              variant="outline"
+                              className="bg-orange-50 text-orange-700 border-orange-200 text-[10px] px-1.5 py-0 leading-4 font-semibold shrink-0"
+                            >
+                              <Bot className="h-3 w-3 mr-0.5" />
+                              Action1
                             </Badge>
                           )}
                         </span>
