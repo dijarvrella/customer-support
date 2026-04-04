@@ -69,6 +69,8 @@ import {
   Shield,
   ChevronDown,
   MoreHorizontal,
+  BellOff,
+  Bell,
 } from "lucide-react";
 import { AutomationActions } from "@/components/tickets/automation-actions";
 import { TicketWorkflowTimeline } from "@/components/tickets/ticket-workflow-timeline";
@@ -91,6 +93,7 @@ interface TicketDetail {
   firstResponseAt: string | null;
   resolvedAt: string | null;
   closedAt: string | null;
+  reminderSnoozedUntil: string | null;
   createdAt: string;
   updatedAt: string;
   requester: {
@@ -200,6 +203,8 @@ export default function TicketDetailPage() {
     role: string;
     isGlobalAdmin?: boolean;
   } | null>(null);
+
+  const [snoozing, setSnoozing] = useState(false);
 
   useEffect(() => {
     fetch("/api/auth/session")
@@ -564,6 +569,41 @@ export default function TicketDetailPage() {
                 {STATUS_LABELS[status as TicketStatus] || status}
               </Button>
             ))}
+
+            {/* Snooze reminders button */}
+            {(() => {
+              const snoozed = ticket.reminderSnoozedUntil && new Date(ticket.reminderSnoozedUntil) > new Date();
+              return (
+                <Button
+                  variant={snoozed ? "secondary" : "outline"}
+                  size="sm"
+                  disabled={snoozing}
+                  onClick={async () => {
+                    setSnoozing(true);
+                    try {
+                      if (snoozed) {
+                        await fetch(`/api/tickets/${ticketId}/snooze`, { method: "DELETE" });
+                      } else {
+                        await fetch(`/api/tickets/${ticketId}/snooze`, { method: "POST" });
+                      }
+                      await fetchTicket();
+                    } catch { /* silent */ } finally { setSnoozing(false); }
+                  }}
+                  title={snoozed ? `Reminders silenced until ${new Date(ticket.reminderSnoozedUntil!).toLocaleDateString()}` : "Silence reminders for 7 days"}
+                >
+                  {snoozing ? (
+                    <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                  ) : snoozed ? (
+                    <BellOff className="h-3 w-3 mr-1" />
+                  ) : (
+                    <Bell className="h-3 w-3 mr-1" />
+                  )}
+                  {snoozed
+                    ? `Snoozed until ${new Date(ticket.reminderSnoozedUntil!).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
+                    : "Snooze"}
+                </Button>
+              );
+            })()}
 
             <Dialog open={assignDialogOpen} onOpenChange={(open) => { setAssignDialogOpen(open); if (!open) { setUserSearch(""); setUserResults([]); } }}>
               <DialogTrigger asChild>

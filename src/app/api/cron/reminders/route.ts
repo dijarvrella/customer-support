@@ -4,6 +4,7 @@ import { tickets, users, ticketComments, notifications } from "@/lib/db/schema";
 import { eq, and, sql, lt, desc, notInArray } from "drizzle-orm";
 import { Resend } from "resend";
 import { emailLayout, ticketLink, escapeHtml } from "@/lib/notifications/email";
+import { generateSnoozeToken } from "@/app/api/tickets/[id]/snooze/route";
 
 // Verify cron secret to prevent unauthorized access
 const CRON_SECRET = process.env.CRON_SECRET;
@@ -75,7 +76,7 @@ export async function GET(request: NextRequest) {
 
   try {
     // ─── 1. ASSIGNEE REMINDERS ──────────────────────────────────────────
-    // Tickets assigned but no activity in 24+ hours
+    // Tickets assigned but no activity in 24+ hours, and no reminder sent in last 72 hours
     const staleAssigned = await db
       .select({
         ticketId: tickets.id,
@@ -94,7 +95,14 @@ export async function GET(request: NextRequest) {
         and(
           sql`${tickets.status} IN ('new', 'triaged', 'in_progress')`,
           sql`${tickets.assigneeId} IS NOT NULL`,
-          sql`${tickets.updatedAt} < NOW() - INTERVAL '24 hours'`
+          sql`${tickets.updatedAt} < NOW() - INTERVAL '24 hours'`,
+          sql`(${tickets.reminderSnoozedUntil} IS NULL OR ${tickets.reminderSnoozedUntil} < NOW())`,
+          sql`NOT EXISTS (
+            SELECT 1 FROM notifications
+            WHERE ticket_id = ${tickets.id}
+              AND type = 'reminder'
+              AND created_at > NOW() - INTERVAL '72 hours'
+          )`
         )
       )
       .limit(50);
@@ -125,6 +133,9 @@ export async function GET(request: NextRequest) {
           );
         }
 
+        const snoozeToken = generateSnoozeToken(ticket.ticketId);
+        const snoozeUrl = `${PORTAL_URL}/api/tickets/${ticket.ticketId}/snooze?token=${snoozeToken}`;
+
         await resend.emails.send({
           from: FROM_EMAIL,
           to: ticket.assigneeEmail,
@@ -143,6 +154,9 @@ export async function GET(request: NextRequest) {
             </div>
             <p style="margin:0 0 8px;font-size:15px;color:#475569;text-align:center;line-height:1.55;">Please review and update the ticket with your progress or resolution.</p>
             ${ticketLink(`${PORTAL_URL}/tickets/${ticket.ticketId}`, "View Ticket")}
+            <p style="margin:16px 0 0;text-align:center;">
+              <a href="${snoozeUrl}" style="font-size:13px;color:#94a3b8;text-decoration:underline;">Silence reminders for 7 days</a>
+            </p>
           `),
         });
         result.assigneeReminders++;
@@ -153,12 +167,14 @@ export async function GET(request: NextRequest) {
 
     // ─── 2. REQUESTER FOLLOW-UPS ────────────────────────────────────────
     // Tickets resolved 48+ hours ago that haven't been closed - ask requester to confirm
+    // Throttled to once per 7 days per ticket
     const resolvedPending = await db
       .select({
         ticketId: tickets.id,
         ticketNumber: tickets.ticketNumber,
         title: tickets.title,
         resolvedAt: tickets.resolvedAt,
+        requesterId: tickets.requesterId,
         requesterEmail: sql<string>`(SELECT email FROM users WHERE id = ${tickets.requesterId})`,
         requesterName: sql<string>`(SELECT name FROM users WHERE id = ${tickets.requesterId})`,
       })
@@ -167,7 +183,13 @@ export async function GET(request: NextRequest) {
         and(
           eq(tickets.status, "resolved"),
           sql`${tickets.resolvedAt} IS NOT NULL`,
-          sql`${tickets.resolvedAt} < NOW() - INTERVAL '48 hours'`
+          sql`${tickets.resolvedAt} < NOW() - INTERVAL '48 hours'`,
+          sql`NOT EXISTS (
+            SELECT 1 FROM notifications
+            WHERE ticket_id = ${tickets.id}
+              AND type = 'requester_followup'
+              AND created_at > NOW() - INTERVAL '7 days'
+          )`
         )
       )
       .limit(30);
@@ -189,6 +211,18 @@ export async function GET(request: NextRequest) {
             ${ticketLink(`${PORTAL_URL}/tickets/${ticket.ticketId}`, "View Ticket")}
           `),
         });
+
+        // Record so we don't follow up again for 7 days
+        if (ticket.requesterId) {
+          await createNotification(
+            ticket.requesterId as string,
+            ticket.ticketId,
+            "requester_followup",
+            `Follow-up sent for ${ticket.ticketNumber}`,
+            `Confirmation email sent to requester.`
+          );
+        }
+
         result.requesterFollowUps++;
       } catch (err: any) {
         result.errors.push(`Follow-up for ${ticket.ticketNumber}: ${err.message}`);

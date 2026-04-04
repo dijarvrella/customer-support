@@ -178,6 +178,7 @@ export const tickets = pgTable(
     resolvedAt: timestamp("resolved_at"),
     closedAt: timestamp("closed_at"),
     legalHold: boolean("legal_hold").notNull().default(false),
+    reminderSnoozedUntil: timestamp("reminder_snoozed_until"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
